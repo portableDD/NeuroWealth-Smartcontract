@@ -679,19 +679,19 @@ impl NeuroWealthVault {
             .storage()
             .persistent()
             .get(&DataKey::Balance(user.clone()))
-            .unwrap_or(0);
+            .unwrap_or(0_i128);
         env.storage()
             .persistent()
-            .set(&DataKey::Balance(user.clone()), &(current_balance + amount));
+            .set(&DataKey::Balance(user.clone()), &(current_balance.checked_add(amount).expect("vault: balance overflow")));
 
         let total: i128 = env
             .storage()
             .instance()
             .get(&DataKey::TotalDeposits)
-            .unwrap_or(0);
+            .unwrap_or(0_i128);
         env.storage()
             .instance()
-            .set(&DataKey::TotalDeposits, &(total + amount));
+            .set(&DataKey::TotalDeposits, &(total.checked_add(amount).expect("vault: total deposits overflow")));
 
         // Mint shares based on current share price and update total assets
         let shares_to_mint = Self::convert_to_shares_internal(&env, amount);
@@ -702,10 +702,10 @@ impl NeuroWealthVault {
             .storage()
             .persistent()
             .get(&DataKey::Shares(user.clone()))
-            .unwrap_or(0);
+            .unwrap_or(0_i128);
         env.storage().persistent().set(
             &DataKey::Shares(user.clone()),
-            &(current_shares + shares_to_mint),
+            &(current_shares.checked_add(shares_to_mint).expect("vault: shares overflow")),
         );
 
         // Update total shares
@@ -713,16 +713,16 @@ impl NeuroWealthVault {
             .storage()
             .instance()
             .get(&DataKey::TotalShares)
-            .unwrap_or(0);
+            .unwrap_or(0_i128);
         env.storage()
             .instance()
-            .set(&DataKey::TotalShares, &(total_shares + shares_to_mint));
+            .set(&DataKey::TotalShares, &(total_shares.checked_add(shares_to_mint).expect("vault: total shares overflow")));
 
         // Update total assets (principal + yield)
         let total_assets = Self::get_total_assets_internal(&env);
         env.storage()
             .instance()
-            .set(&DataKey::TotalAssets, &(total_assets + amount));
+            .set(&DataKey::TotalAssets, &(total_assets.checked_add(amount).expect("vault: total assets overflow")));
 
         env.events().publish(
             (symbol_short!("deposit"),),
@@ -799,7 +799,7 @@ impl NeuroWealthVault {
             // If vault doesn't have enough USDC, try to withdraw from Blend
             if vault_balance < amount {
                 // Calculate how much we need to withdraw
-                let needed = amount - vault_balance;
+                let needed = amount.checked_sub(vault_balance).expect("vault: math error");
 
                 // Attempt to withdraw from Blend
                 // If this returns less than needed, we will reconcile below
@@ -823,7 +823,7 @@ impl NeuroWealthVault {
             .storage()
             .persistent()
             .get(&DataKey::Shares(user.clone()))
-            .unwrap_or(0);
+            .unwrap_or(0_i128);
         assert!(user_shares > 0, "vault: insufficient shares");
 
         let total_shares = Self::get_total_shares_internal(&env);
@@ -851,17 +851,17 @@ impl NeuroWealthVault {
         // Update user shares and total shares
         env.storage().persistent().set(
             &DataKey::Shares(user.clone()),
-            &(user_shares - shares_to_burn),
+            &(user_shares.checked_sub(shares_to_burn).expect("vault: shares underflow")),
         );
 
         env.storage()
             .instance()
-            .set(&DataKey::TotalShares, &(total_shares - shares_to_burn));
+            .set(&DataKey::TotalShares, &(total_shares.checked_sub(shares_to_burn).expect("vault: total shares underflow")));
 
         // Update total assets (principal + yield)
         env.storage()
             .instance()
-            .set(&DataKey::TotalAssets, &(total_assets - usdc_to_return));
+            .set(&DataKey::TotalAssets, &(total_assets.checked_sub(usdc_to_return).expect("vault: total assets underflow")));
 
         // Update principal tracking: reduce user's principal balance and total deposits,
         // but never below zero. Yield component does not affect principal accounting.
@@ -869,23 +869,23 @@ impl NeuroWealthVault {
             .storage()
             .persistent()
             .get(&DataKey::Balance(user.clone()))
-            .unwrap_or(0);
+            .unwrap_or(0_i128);
         if principal_balance > 0 {
             let principal_repaid = min(principal_balance, usdc_to_return);
 
             env.storage().persistent().set(
                 &DataKey::Balance(user.clone()),
-                &(principal_balance - principal_repaid),
+                &(principal_balance.checked_sub(principal_repaid).expect("vault: principal underflow")),
             );
 
             let total_deposits: i128 = env
                 .storage()
                 .instance()
                 .get(&DataKey::TotalDeposits)
-                .unwrap_or(0);
+                .unwrap_or(0_i128);
             env.storage().instance().set(
                 &DataKey::TotalDeposits,
-                &(total_deposits - principal_repaid),
+                &(total_deposits.checked_sub(principal_repaid).expect("vault: total deposits underflow")),
             );
         }
 
@@ -957,7 +957,7 @@ impl NeuroWealthVault {
             .storage()
             .persistent()
             .get(&DataKey::Shares(user.clone()))
-            .unwrap_or(0);
+            .unwrap_or(0_i128);
         assert!(user_shares > 0, "vault: no shares to withdraw");
 
         let total_shares = Self::get_total_shares_internal(&env);
@@ -979,7 +979,7 @@ impl NeuroWealthVault {
             // If vault doesn't have enough USDC, try to withdraw from Blend
             if vault_balance < entitled_amount {
                 // Attempt to withdraw from Blend
-                let needed = entitled_amount - vault_balance;
+                let needed = entitled_amount.checked_sub(vault_balance).expect("vault: math error");
                 let _ = Self::withdraw_from_blend(&env, needed);
 
                 // RECONCILIATION: Check actual available USDC after potential Blend withdrawal
@@ -1001,41 +1001,41 @@ impl NeuroWealthVault {
         // Update user shares
         env.storage().persistent().set(
             &DataKey::Shares(user.clone()),
-            &(user_shares - shares_to_burn),
+            &(user_shares.checked_sub(shares_to_burn).expect("vault: shares underflow")),
         );
 
         // Update total shares
         env.storage()
             .instance()
-            .set(&DataKey::TotalShares, &(total_shares - shares_to_burn));
+            .set(&DataKey::TotalShares, &(total_shares.checked_sub(shares_to_burn).expect("vault: total shares underflow")));
 
         // Update total assets
         env.storage()
             .instance()
-            .set(&DataKey::TotalAssets, &(total_assets - usdc_to_return));
+            .set(&DataKey::TotalAssets, &(total_assets.checked_sub(usdc_to_return).expect("vault: total assets underflow")));
 
         // Update principal tracking
         let principal_balance: i128 = env
             .storage()
             .persistent()
             .get(&DataKey::Balance(user.clone()))
-            .unwrap_or(0);
+            .unwrap_or(0_i128);
         if principal_balance > 0 {
             let principal_repaid = core::cmp::min(principal_balance, usdc_to_return);
 
             env.storage().persistent().set(
                 &DataKey::Balance(user.clone()),
-                &(principal_balance - principal_repaid),
+                &(principal_balance.checked_sub(principal_repaid).expect("vault: principal underflow")),
             );
 
             let total_deposits: i128 = env
                 .storage()
                 .instance()
                 .get(&DataKey::TotalDeposits)
-                .unwrap_or(0);
+                .unwrap_or(0_i128);
             env.storage().instance().set(
                 &DataKey::TotalDeposits,
-                &(total_deposits - principal_repaid),
+                &(total_deposits.checked_sub(principal_repaid).expect("vault: total deposits underflow")),
             );
         }
 
@@ -1305,7 +1305,7 @@ impl NeuroWealthVault {
             panic!("vault: tvl cap cannot be negative");
         }
 
-        let old_tvl_cap = env.storage().instance().get(&DataKey::TvLCap).unwrap_or(0);
+        let old_tvl_cap: i128 = env.storage().instance().get(&DataKey::TvLCap).unwrap_or(0_i128);
 
         env.storage().instance().set(&DataKey::TvLCap, &cap);
 
@@ -1347,12 +1347,11 @@ impl NeuroWealthVault {
             panic!("vault: user deposit cap cannot be negative");
         }
 
-        let old_tvl_cap = env.storage().instance().get(&DataKey::TvLCap).unwrap_or(0);
-        let old_user_cap = env
+        let old_user_cap: i128 = env
             .storage()
             .instance()
             .get(&DataKey::UserDepositCap)
-            .unwrap_or(0);
+            .unwrap_or(0_i128);
 
         env.storage().instance().set(&DataKey::UserDepositCap, &cap);
 
@@ -1404,12 +1403,12 @@ impl NeuroWealthVault {
             panic!("vault: max limit must be >= min limit");
         }
 
-        let old_user_cap = env
+        let old_user_cap: i128 = env
             .storage()
             .instance()
             .get(&DataKey::UserDepositCap)
-            .unwrap_or(0);
-        let old_tvl_cap = env.storage().instance().get(&DataKey::TvLCap).unwrap_or(0);
+            .unwrap_or(0_i128);
+        let old_tvl_cap: i128 = env.storage().instance().get(&DataKey::TvLCap).unwrap_or(0_i128);
 
         env.storage().instance().set(&DataKey::UserDepositCap, &min);
         env.storage().instance().set(&DataKey::TvLCap, &max);
@@ -1494,7 +1493,7 @@ impl NeuroWealthVault {
     /// The current TVL cap in USDC units (7 decimal places), or 0 if no cap
     pub fn get_tvl_cap(env: Env) -> i128 {
         Self::require_initialized(&env);
-        env.storage().instance().get(&DataKey::TvLCap).unwrap_or(0)
+        env.storage().instance().get(&DataKey::TvLCap).unwrap_or(0_i128)
     }
 
     /// Returns the current per-user deposit cap.
@@ -1509,7 +1508,7 @@ impl NeuroWealthVault {
         env.storage()
             .instance()
             .get(&DataKey::UserDepositCap)
-            .unwrap_or(0)
+            .unwrap_or(0_i128)
     }
 
     /// Returns the current minimum deposit limit.
@@ -1916,7 +1915,7 @@ impl NeuroWealthVault {
 
         let old_version: u32 = env.storage().instance().get(&DataKey::Version).unwrap_or(1);
 
-        let new_version = old_version + 1;
+        let new_version = old_version.checked_add(1).expect("vault: version overflow");
         env.storage()
             .instance()
             .set(&DataKey::Version, &new_version);
@@ -1962,7 +1961,7 @@ impl NeuroWealthVault {
             env.storage().persistent().extend_ttl(&shares_key, 100, 100);
         }
 
-        let shares: i128 = env.storage().persistent().get(&shares_key).unwrap_or(0);
+        let shares: i128 = env.storage().persistent().get(&shares_key).unwrap_or(0_i128);
         if shares == 0 {
             return 0;
         }
@@ -1974,7 +1973,7 @@ impl NeuroWealthVault {
             0
         } else {
             // User's pro-rata claim: (user_shares / total_shares) * total_assets
-            shares * total_assets / total_shares
+            shares.checked_mul(total_assets).expect("vault: conversion mul overflow").checked_div(total_shares).expect("vault: conversion div error")
         }
     }
 
@@ -2000,7 +1999,7 @@ impl NeuroWealthVault {
         env.storage()
             .instance()
             .get(&DataKey::TotalDeposits)
-            .unwrap_or(0)
+            .unwrap_or(0_i128)
     }
 
     /// Returns the total managed assets of the vault (principal + yield).
@@ -2032,7 +2031,7 @@ impl NeuroWealthVault {
             env.storage().persistent().extend_ttl(&shares_key, 100, 100);
         }
 
-        env.storage().persistent().get(&shares_key).unwrap_or(0)
+        env.storage().persistent().get(&shares_key).unwrap_or(0_i128)
     }
 
     pub fn get_user_info(env: Env, user: Address) -> UserInfo {
@@ -2041,7 +2040,7 @@ impl NeuroWealthVault {
             .storage()
             .persistent()
             .get(&DataKey::Balance(user.clone()))
-            .unwrap_or(0);
+            .unwrap_or(0_i128);
         let shares = Self::get_shares(env, user);
 
         UserInfo { principal, shares }
@@ -2291,7 +2290,7 @@ impl NeuroWealthVault {
             .storage()
             .instance()
             .get(&DataKey::MinDeposit)
-            .unwrap_or(0);
+            .unwrap_or(0_i128);
         assert!(amount >= min_deposit, "vault: below minimum deposit");
     }
 
@@ -2321,15 +2320,15 @@ impl NeuroWealthVault {
             .storage()
             .instance()
             .get(&DataKey::UserDepositCap)
-            .unwrap_or(0);
+            .unwrap_or(0_i128);
         if cap > 0 {
             let current_balance: i128 = env
                 .storage()
                 .persistent()
                 .get(&DataKey::Balance(user.clone()))
-                .unwrap_or(0);
+                .unwrap_or(0_i128);
             assert!(
-                current_balance + amount <= cap,
+                current_balance.checked_add(amount).expect("vault: cap check overflow") <= cap,
                 "vault: exceeds user deposit cap"
             );
         }
@@ -2341,14 +2340,14 @@ impl NeuroWealthVault {
     /// - If total deposits would exceed the TVL cap
     #[inline]
     fn require_within_tvl_cap(env: &Env, amount: i128) {
-        let cap: i128 = env.storage().instance().get(&DataKey::TvLCap).unwrap_or(0);
+        let cap: i128 = env.storage().instance().get(&DataKey::TvLCap).unwrap_or(0_i128);
         if cap > 0 {
             let total: i128 = env
                 .storage()
                 .instance()
                 .get(&DataKey::TotalDeposits)
-                .unwrap_or(0);
-            assert!(total + amount <= cap, "vault: exceeds TVL cap");
+                .unwrap_or(0_i128);
+            assert!(total.checked_add(amount).expect("vault: cap check overflow") <= cap, "vault: exceeds TVL cap");
         }
     }
 
@@ -2358,7 +2357,7 @@ impl NeuroWealthVault {
         env.storage()
             .instance()
             .get(&DataKey::TotalShares)
-            .unwrap_or(0)
+            .unwrap_or(0_i128)
     }
 
     /// Returns the current total managed assets (principal + yield).
@@ -2374,7 +2373,7 @@ impl NeuroWealthVault {
                 .storage()
                 .instance()
                 .get(&DataKey::TotalDeposits)
-                .unwrap_or(0),
+                .unwrap_or(0_i128),
         }
     }
 
@@ -2392,7 +2391,7 @@ impl NeuroWealthVault {
             // Bootstrap: 1:1 mapping between assets and shares
             assets
         } else {
-            assets * total_shares / total_assets
+            assets.checked_mul(total_shares).expect("vault: conversion mul overflow").checked_div(total_assets).expect("vault: conversion div error")
         }
     }
 
@@ -2409,7 +2408,7 @@ impl NeuroWealthVault {
         if total_shares == 0 || total_assets == 0 {
             0
         } else {
-            shares * total_assets / total_shares
+            shares.checked_mul(total_assets).expect("vault: conversion mul overflow").checked_div(total_shares).expect("vault: conversion div error")
         }
     }
 
