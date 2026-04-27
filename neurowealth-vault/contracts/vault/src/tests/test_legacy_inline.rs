@@ -7,9 +7,9 @@ fn setup_vault(env: &Env) -> (Address, Address, Address) {
 
     let agent = Address::generate(env);
     let usdc_token = Address::generate(env);
-    let owner = agent.clone();
+    let owner = Address::generate(env);
 
-    client.initialize(&agent, &usdc_token);
+    client.initialize(&owner, &agent, &usdc_token);
 
     (contract_id, agent, owner)
 }
@@ -23,9 +23,10 @@ fn test_vault_initialization() {
     let client = NeuroWealthVaultClient::new(&env, &contract_id);
 
     let agent = Address::generate(&env);
+    let owner = Address::generate(&env);
     let usdc_token = Address::generate(&env);
 
-    client.initialize(&agent, &usdc_token);
+    client.initialize(&owner, &agent, &usdc_token);
 
     assert_eq!(client.get_agent(), agent);
     assert_eq!(client.get_usdc_token(), usdc_token);
@@ -172,8 +173,9 @@ fn test_withdraw_checks_effects_interactions_pattern() {
     let agent = Address::generate(&env);
     let user = Address::generate(&env);
     let usdc_token = Address::generate(&env);
+    let owner = Address::generate(&env);
 
-    client.initialize(&agent, &usdc_token);
+    client.initialize(&owner, &agent, &usdc_token);
 
     assert_eq!(client.get_balance(&user), 0);
     assert_eq!(client.get_total_deposits(), 0);
@@ -232,8 +234,9 @@ fn test_withdraw_reentrancy_protection() {
 
     let agent = Address::generate(&env);
     let usdc_token = Address::generate(&env);
+    let owner = Address::generate(&env);
 
-    client.initialize(&agent, &usdc_token);
+    client.initialize(&owner, &agent, &usdc_token);
 }
 
 #[test]

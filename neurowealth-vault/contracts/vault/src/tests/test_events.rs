@@ -16,9 +16,10 @@ fn test_initialize_emits_init_event_with_correct_payload() {
     let client = NeuroWealthVaultClient::new(&env, &contract_id);
 
     let agent = Address::generate(&env);
+    let owner = Address::generate(&env);
     let usdc_token = Address::generate(&env);
     let expected_tvl_cap = 100_000_000_000_i128;
-    client.initialize(&agent, &usdc_token);
+    client.initialize(&owner, &agent, &usdc_token);
 
     let init_events = find_events_by_topic(env.events().all(), &env, symbol_short!("init"));
     assert_eq!(

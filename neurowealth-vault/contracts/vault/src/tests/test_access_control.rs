@@ -185,10 +185,11 @@ fn test_non_owner_cannot_emergency_pause() {
     let contract_id = env.register_contract(None, NeuroWealthVault);
     let client = NeuroWealthVaultClient::new(&env, &contract_id);
     let agent = Address::generate(&env);
+    let owner = Address::generate(&env);
     let usdc_token = Address::generate(&env);
-    client.initialize(&agent, &usdc_token);
+    client.initialize(&owner, &agent, &usdc_token);
 
-    // owner == agent by default; use a fresh address as non-owner
+    // owner and agent are distinct; use a fresh address as non-owner
     let non_owner = Address::generate(&env);
     client.emergency_pause(&non_owner);
 }

@@ -271,6 +271,26 @@ pub struct EmergencyPausedEvent {
     pub owner: Address,
 }
 
+/// Emitted when the TVL cap is updated.
+///
+/// # Topics
+/// - `SymbolShort("tvl_cap_updated")` - Event identifier
+#[contracttype]
+pub struct TvlCapUpdatedEvent {
+    pub old_cap: i128,
+    pub new_cap: i128,
+}
+
+/// Emitted when the per-user deposit cap is updated.
+///
+/// # Topics
+/// - `SymbolShort("user_cap_updated")` - Event identifier
+#[contracttype]
+pub struct UserDepositCapUpdatedEvent {
+    pub old_cap: i128,
+    pub new_cap: i128,
+}
+
 /// Emitted when deposit limits are updated.
 ///
 /// # Topics
@@ -564,7 +584,7 @@ impl NeuroWealthVault {
     /// - The deployer should verify the agent and token addresses are correct
     /// - After initialization, the deployer should transfer ownership or destroy
     ///   the deployer key to prevent re-initialization
-    pub fn initialize(env: Env, agent: Address, usdc_token: Address) {
+    pub fn initialize(env: Env, owner: Address, agent: Address, usdc_token: Address) {
         if env.storage().instance().has(&DataKey::Agent) {
             panic!("vault: already initialized");
         }
@@ -581,7 +601,7 @@ impl NeuroWealthVault {
         env.storage().instance().set(&DataKey::TotalShares, &0_i128);
         env.storage().instance().set(&DataKey::TotalAssets, &0_i128);
         env.storage().instance().set(&DataKey::Paused, &false);
-        env.storage().instance().set(&DataKey::Owner, &agent);
+        env.storage().instance().set(&DataKey::Owner, &owner);
         env.storage().instance().set(&DataKey::TvLCap, &tvl_cap);
         env.storage()
             .instance()
@@ -640,6 +660,7 @@ impl NeuroWealthVault {
     /// - Checks are performed before state updates (checks-effects-interactions pattern)
     /// - Balance is updated after successful token transfer
     pub fn deposit(env: Env, user: Address, amount: i128) {
+        Self::require_initialized(&env);
         user.require_auth();
 
         Self::require_not_paused(&env);
@@ -751,6 +772,7 @@ impl NeuroWealthVault {
     /// - Uses checks-effects-interactions pattern: balance updated before transfer
     /// - Funds are pulled from Blend if necessary before user transfer
     pub fn withdraw(env: Env, user: Address, amount: i128) {
+        Self::require_initialized(&env);
         user.require_auth();
 
         Self::require_not_paused(&env);
@@ -916,6 +938,7 @@ impl NeuroWealthVault {
     /// - Uses checks-effects-interactions pattern
     /// - Funds are pulled from Blend if necessary before user transfer
     pub fn withdraw_all(env: Env, user: Address) -> i128 {
+        Self::require_initialized(&env);
         user.require_auth();
 
         Self::require_not_paused(&env);
@@ -1073,6 +1096,7 @@ impl NeuroWealthVault {
     /// - Funds are moved on-chain via cross-contract calls
     /// - Errors in protocol calls are handled gracefully to prevent fund lockup
     pub fn rebalance(env: Env, protocol: Symbol, expected_apy: i128) {
+        Self::require_initialized(&env);
         Self::require_not_paused(&env);
         Self::require_is_agent(&env);
 
@@ -1163,6 +1187,7 @@ impl NeuroWealthVault {
     /// - There is no automatic unpause - owner must explicitly call unpause()
     /// - Users' funds remain safe and can be withdrawn after unpause
     pub fn pause(env: Env, owner: Address) {
+        Self::require_initialized(&env);
         owner.require_auth();
         let stored_owner: Address = env.storage().instance().get(&DataKey::Owner).unwrap();
         assert_eq!(owner, stored_owner, "vault: only owner can pause");
@@ -1194,6 +1219,7 @@ impl NeuroWealthVault {
     /// # Security
     /// - Only the owner can unpause the vault (verified via require_auth)
     pub fn unpause(env: Env, owner: Address) {
+        Self::require_initialized(&env);
         owner.require_auth();
         let stored_owner: Address = env.storage().instance().get(&DataKey::Owner).unwrap();
         assert_eq!(owner, stored_owner, "vault: only owner can unpause");
@@ -1234,6 +1260,7 @@ impl NeuroWealthVault {
     /// # Security
     /// - Only the owner can emergency pause the vault (verified via require_auth)
     pub fn emergency_pause(env: Env, owner: Address) {
+        Self::require_initialized(&env);
         owner.require_auth();
         let stored_owner: Address = env.storage().instance().get(&DataKey::Owner).unwrap();
         assert_eq!(owner, stored_owner, "vault: only owner can emergency pause");
@@ -1265,12 +1292,13 @@ impl NeuroWealthVault {
     /// - If the caller is not the owner
     ///
     /// # Events
-    /// Emits `LimitsUpdatedEvent` with old and new values for both limits
+    /// Emits `TvlCapUpdatedEvent`
     ///
     /// # Security
     /// - Only the owner can modify the TVL cap
     /// - Reducing the cap below current total deposits does not affect existing deposits
     pub fn set_tvl_cap(env: Env, cap: i128) {
+        Self::require_initialized(&env);
         Self::require_is_owner(&env);
 
         if cap < 0 {
@@ -1278,21 +1306,14 @@ impl NeuroWealthVault {
         }
 
         let old_tvl_cap = env.storage().instance().get(&DataKey::TvLCap).unwrap_or(0);
-        let old_user_cap = env
-            .storage()
-            .instance()
-            .get(&DataKey::UserDepositCap)
-            .unwrap_or(0);
 
         env.storage().instance().set(&DataKey::TvLCap, &cap);
 
         env.events().publish(
-            (symbol_short!("limits"),),
-            LimitsUpdatedEvent {
-                old_min: old_user_cap,
-                new_min: old_user_cap,
-                old_max: old_tvl_cap,
-                new_max: cap,
+            (symbol_short!("tvl_cap"),),
+            TvlCapUpdatedEvent {
+                old_cap: old_tvl_cap,
+                new_cap: cap,
             },
         );
     }
@@ -1313,12 +1334,13 @@ impl NeuroWealthVault {
     /// - If the caller is not the owner
     ///
     /// # Events
-    /// Emits `LimitsUpdatedEvent` with old and new values for both limits
+    /// Emits `UserDepositCapUpdatedEvent`
     ///
     /// # Security
     /// - Only the owner can modify the user deposit cap
     /// - Reducing the cap below a user's current balance does not affect them
     pub fn set_user_deposit_cap(env: Env, cap: i128) {
+        Self::require_initialized(&env);
         Self::require_is_owner(&env);
 
         if cap < 0 {
@@ -1335,12 +1357,10 @@ impl NeuroWealthVault {
         env.storage().instance().set(&DataKey::UserDepositCap, &cap);
 
         env.events().publish(
-            (symbol_short!("limits"),),
-            LimitsUpdatedEvent {
-                old_min: old_user_cap,
-                new_min: cap,
-                old_max: old_tvl_cap,
-                new_max: old_tvl_cap,
+            (symbol_short!("user_cap"),),
+            UserDepositCapUpdatedEvent {
+                old_cap: old_user_cap,
+                new_cap: cap,
             },
         );
     }
@@ -1371,6 +1391,7 @@ impl NeuroWealthVault {
     /// # Security
     /// - Only the owner can modify the limits
     pub fn set_limits(env: Env, min: i128, max: i128) {
+        Self::require_initialized(&env);
         Self::require_is_owner(&env);
 
         if min < 0 {
@@ -1432,6 +1453,7 @@ impl NeuroWealthVault {
     /// # Security
     /// - Only the owner can modify the deposit limits
     pub fn set_deposit_limits(env: Env, min: i128, max: i128) {
+        Self::require_initialized(&env);
         Self::require_is_owner(&env);
 
         // Validate limits
@@ -1471,6 +1493,7 @@ impl NeuroWealthVault {
     /// # Returns
     /// The current TVL cap in USDC units (7 decimal places), or 0 if no cap
     pub fn get_tvl_cap(env: Env) -> i128 {
+        Self::require_initialized(&env);
         env.storage().instance().get(&DataKey::TvLCap).unwrap_or(0)
     }
 
@@ -1482,6 +1505,7 @@ impl NeuroWealthVault {
     /// # Returns
     /// The current per-user deposit cap in USDC units (7 decimal places), or 0 if no cap
     pub fn get_user_deposit_cap(env: Env) -> i128 {
+        Self::require_initialized(&env);
         env.storage()
             .instance()
             .get(&DataKey::UserDepositCap)
@@ -1496,6 +1520,7 @@ impl NeuroWealthVault {
     /// # Returns
     /// The current minimum deposit limit in USDC units (7 decimal places)
     pub fn get_min_deposit(env: Env) -> i128 {
+        Self::require_initialized(&env);
         env.storage()
             .instance()
             .get(&DataKey::MinDeposit)
@@ -1510,6 +1535,7 @@ impl NeuroWealthVault {
     /// # Returns
     /// The current maximum deposit limit in USDC units (7 decimal places)
     pub fn get_max_deposit(env: Env) -> i128 {
+        Self::require_initialized(&env);
         env.storage()
             .instance()
             .get(&DataKey::MaxDeposit)
@@ -1540,6 +1566,7 @@ impl NeuroWealthVault {
     /// - Only the owner can update the agent
     /// - The old agent will immediately lose access to rebalance()
     pub fn update_agent(env: Env, new_agent: Address) {
+        Self::require_initialized(&env);
         Self::require_is_owner(&env);
 
         let old_agent: Address = env.storage().instance().get(&DataKey::Agent).unwrap();
@@ -1575,9 +1602,18 @@ impl NeuroWealthVault {
     /// - Only the owner can set the Blend pool address
     /// - The pool address should be verified against Blend's official deployments
     pub fn set_blend_pool(env: Env, owner: Address, pool_address: Address) {
+        Self::require_initialized(&env);
         owner.require_auth();
         let stored_owner: Address = env.storage().instance().get(&DataKey::Owner).unwrap();
         assert_eq!(owner, stored_owner, "vault: only owner can set blend pool");
+
+        let usdc_token: Address = env.storage().instance().get(&DataKey::UsdcToken).unwrap();
+        let _ = BlendPoolClient::get_balance(
+            &env,
+            &pool_address,
+            &usdc_token,
+            &env.current_contract_address(),
+        );
 
         env.storage()
             .instance()
@@ -1621,6 +1657,7 @@ impl NeuroWealthVault {
     /// - New owner must explicitly accept (prevents accidental transfers)
     /// - Can be cancelled by calling with zero address or initiating new transfer
     pub fn transfer_ownership(env: Env, new_owner: Address) {
+        Self::require_initialized(&env);
         Self::require_is_owner(&env);
 
         let current_owner: Address = env.storage().instance().get(&DataKey::Owner).unwrap();
@@ -1665,6 +1702,7 @@ impl NeuroWealthVault {
     /// - Requires explicit authorization from new owner
     /// - Clears pending owner after successful transfer
     pub fn accept_ownership(env: Env, new_owner: Address) {
+        Self::require_initialized(&env);
         new_owner.require_auth();
 
         let pending: Address = env
@@ -1712,6 +1750,7 @@ impl NeuroWealthVault {
     /// # Security
     /// - Only current owner can cancel
     pub fn cancel_ownership_transfer(env: Env) {
+        Self::require_initialized(&env);
         Self::require_is_owner(&env);
 
         let pending: Address = env
@@ -1741,6 +1780,7 @@ impl NeuroWealthVault {
     /// # Returns
     /// The pending owner address, or None if no transfer is pending
     pub fn get_pending_owner(env: Env) -> Option<Address> {
+        Self::require_initialized(&env);
         env.storage().instance().get(&DataKey::PendingOwner)
     }
 
@@ -1774,6 +1814,7 @@ impl NeuroWealthVault {
     /// - Verifies vault actually holds sufficient USDC to back the reported assets
     /// - Prevents agent from inflating asset values beyond actual holdings
     pub fn update_total_assets(env: Env, agent: Address, new_total: i128) {
+        Self::require_initialized(&env);
         // Agent-controlled yield update
         let stored_agent: Address = env.storage().instance().get(&DataKey::Agent).unwrap();
         assert_eq!(
@@ -1867,6 +1908,7 @@ impl NeuroWealthVault {
     /// - The version counter increments atomically with the WASM swap
     /// - All user balances and state are preserved across upgrades
     pub fn upgrade(env: Env, owner: Address, new_wasm_hash: BytesN<32>) {
+        Self::require_initialized(&env);
         owner.require_auth();
 
         let stored_owner: Address = env.storage().instance().get(&DataKey::Owner).unwrap();
@@ -1913,6 +1955,7 @@ impl NeuroWealthVault {
     /// # Events
     /// None
     pub fn get_balance(env: Env, user: Address) -> i128 {
+        Self::require_initialized(&env);
         // Extend TTL for user's share balance to prevent expiration
         let shares_key = DataKey::Shares(user.clone());
         if env.storage().persistent().has(&shares_key) {
@@ -1953,6 +1996,7 @@ impl NeuroWealthVault {
     /// # Events
     /// None
     pub fn get_total_deposits(env: Env) -> i128 {
+        Self::require_initialized(&env);
         env.storage()
             .instance()
             .get(&DataKey::TotalDeposits)
@@ -1964,6 +2008,7 @@ impl NeuroWealthVault {
     /// This value is used for share pricing and reflects the full value
     /// backing all outstanding shares.
     pub fn get_total_assets(env: Env) -> i128 {
+        Self::require_initialized(&env);
         Self::get_total_assets_internal(&env)
     }
 
@@ -1972,6 +2017,7 @@ impl NeuroWealthVault {
     /// This is the sum of all user shares and represents proportional ownership
     /// of the vault's total assets.
     pub fn get_total_shares(env: Env) -> i128 {
+        Self::require_initialized(&env);
         Self::get_total_shares_internal(&env)
     }
 
@@ -1979,6 +2025,7 @@ impl NeuroWealthVault {
     ///
     /// This is the number of vault shares the user owns.
     pub fn get_shares(env: Env, user: Address) -> i128 {
+        Self::require_initialized(&env);
         // Extend TTL for user's share balance to prevent expiration
         let shares_key = DataKey::Shares(user.clone());
         if env.storage().persistent().has(&shares_key) {
@@ -1989,6 +2036,7 @@ impl NeuroWealthVault {
     }
 
     pub fn get_user_info(env: Env, user: Address) -> UserInfo {
+        Self::require_initialized(&env);
         let principal: i128 = env
             .storage()
             .persistent()
@@ -2000,22 +2048,26 @@ impl NeuroWealthVault {
     }
 
     pub fn preview_deposit_to_shares(env: Env, assets: i128) -> i128 {
+        Self::require_initialized(&env);
         Self::convert_to_shares_internal(&env, assets)
     }
 
     pub fn preview_shares_to_assets(env: Env, shares: i128) -> i128 {
+        Self::require_initialized(&env);
         Self::convert_to_assets_internal(&env, shares)
     }
 
     /// Converts an asset amount (USDC) to the corresponding number of shares,
     /// using the current share price.
     pub fn convert_to_shares(env: Env, assets: i128) -> i128 {
+        Self::require_initialized(&env);
         Self::convert_to_shares_internal(&env, assets)
     }
 
     /// Converts a share amount to the corresponding asset amount (USDC),
     /// using the current share price.
     pub fn convert_to_assets(env: Env, shares: i128) -> i128 {
+        Self::require_initialized(&env);
         Self::convert_to_assets_internal(&env, shares)
     }
 
@@ -2036,6 +2088,7 @@ impl NeuroWealthVault {
     /// # Events
     /// None
     pub fn get_agent(env: Env) -> Address {
+        Self::require_initialized(&env);
         env.storage().instance().get(&DataKey::Agent).unwrap()
     }
 
@@ -2055,6 +2108,7 @@ impl NeuroWealthVault {
     /// # Events
     /// None
     pub fn get_owner(env: Env) -> Address {
+        Self::require_initialized(&env);
         env.storage().instance().get(&DataKey::Owner).unwrap()
     }
 
@@ -2072,6 +2126,7 @@ impl NeuroWealthVault {
     /// # Events
     /// None
     pub fn is_paused(env: Env) -> bool {
+        Self::require_initialized(&env);
         env.storage()
             .instance()
             .get(&DataKey::Paused)
@@ -2094,6 +2149,7 @@ impl NeuroWealthVault {
     /// # Events
     /// None
     pub fn get_version(env: Env) -> u32 {
+        Self::require_initialized(&env);
         env.storage().instance().get(&DataKey::Version).unwrap_or(1)
     }
 
@@ -2111,6 +2167,7 @@ impl NeuroWealthVault {
     /// # Events
     /// None
     pub fn get_usdc_token(env: Env) -> Address {
+        Self::require_initialized(&env);
         env.storage().instance().get(&DataKey::UsdcToken).unwrap()
     }
 
@@ -2131,6 +2188,7 @@ impl NeuroWealthVault {
     /// # Events
     /// None
     pub fn get_current_protocol(env: Env) -> Symbol {
+        Self::require_initialized(&env);
         env.storage()
             .instance()
             .get(&DataKey::CurrentProtocol)
@@ -2154,6 +2212,7 @@ impl NeuroWealthVault {
     /// # Events
     /// None
     pub fn get_blend_pool(env: Env) -> Option<Address> {
+        Self::require_initialized(&env);
         env.storage().instance().get(&DataKey::BlendPool)
     }
 
@@ -2175,12 +2234,27 @@ impl NeuroWealthVault {
         assert!(!paused, "vault: paused");
     }
 
+    /// Validates that the vault has been initialized.
+    ///
+    /// # Panics
+    /// - If the vault has not been initialized yet
+    #[inline]
+    fn require_initialized(env: &Env) {
+        assert!(
+            env.storage().instance().has(&DataKey::Agent)
+                && env.storage().instance().has(&DataKey::UsdcToken)
+                && env.storage().instance().has(&DataKey::Owner),
+            "vault: not initialized"
+        );
+    }
+
     /// Validates that the caller is the contract owner.
     ///
     /// # Panics
     /// - If the caller is not the owner
     #[inline]
     fn require_is_owner(env: &Env) {
+        Self::require_initialized(env);
         let owner: Address = env.storage().instance().get(&DataKey::Owner).unwrap();
         owner.require_auth();
     }
@@ -2191,6 +2265,7 @@ impl NeuroWealthVault {
     /// - If the caller is not the agent
     #[inline]
     fn require_is_agent(env: &Env) {
+        Self::require_initialized(env);
         let agent: Address = env.storage().instance().get(&DataKey::Agent).unwrap();
         agent.require_auth();
     }
@@ -2570,9 +2645,9 @@ mod tests {
 
         let agent = Address::generate(env);
         let usdc_token = Address::generate(env);
-        let owner = agent.clone();
+        let owner = Address::generate(env);
 
-        client.initialize(&agent, &usdc_token);
+        client.initialize(&owner, &agent, &usdc_token);
 
         (contract_id, agent, owner)
     }
@@ -2587,8 +2662,9 @@ mod tests {
 
         let agent = Address::generate(&env);
         let usdc_token = Address::generate(&env);
+        let owner = Address::generate(&env);
 
-        client.initialize(&agent, &usdc_token);
+        client.initialize(&owner, &agent, &usdc_token);
 
         // Verify initialization
         assert_eq!(client.get_agent(), agent);
@@ -2756,8 +2832,9 @@ mod tests {
         let agent = Address::generate(&env);
         let user = Address::generate(&env);
         let usdc_token = Address::generate(&env);
+        let owner = Address::generate(&env);
 
-        client.initialize(&agent, &usdc_token);
+        client.initialize(&owner, &agent, &usdc_token);
 
         // Verify initial state
         assert_eq!(client.get_balance(&user), 0);
@@ -2831,8 +2908,9 @@ mod tests {
         let agent = Address::generate(&env);
         let _user = Address::generate(&env);
         let usdc_token = Address::generate(&env);
+        let owner = Address::generate(&env);
 
-        client.initialize(&agent, &usdc_token);
+        client.initialize(&owner, &agent, &usdc_token);
 
         // The withdraw() function implements CEI pattern:
         // CHECKS: user.require_auth(), require_not_paused(), require_positive_amount(), balance check
@@ -2987,9 +3065,9 @@ mod tests {
 
         let usdc_token = env.register_contract(None, MockToken);
         let agent = Address::generate(&env);
-        let owner = agent.clone();
+        let owner = Address::generate(&env);
 
-        client.initialize(&agent, &usdc_token);
+        client.initialize(&owner, &agent, &usdc_token);
 
         let blend_pool_id = env.register_contract(None, MockBlendPool);
 

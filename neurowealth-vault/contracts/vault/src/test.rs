@@ -84,9 +84,9 @@ fn setup_vault_with_token(env: &Env) -> (Address, Address, Address, Address) {
     let client = NeuroWealthVaultClient::new(env, &contract_id);
     let agent = Address::generate(env);
     let usdc_token = env.register_contract(None, TestToken);
-    let owner = agent.clone();
+    let owner = Address::generate(env);
 
-    client.initialize(&agent, &usdc_token);
+    client.initialize(&owner, &agent, &usdc_token);
 
     (contract_id, agent, owner, usdc_token)
 }
@@ -338,9 +338,10 @@ fn test_vault_initialized_event() {
     let client = NeuroWealthVaultClient::new(&env, &contract_id);
 
     let agent = Address::generate(&env);
+    let owner = Address::generate(&env);
     let usdc_token = Address::generate(&env);
 
-    client.initialize(&agent, &usdc_token);
+    client.initialize(&owner, &agent, &usdc_token);
 
     let events = env.events().all();
     assert!(
@@ -464,10 +465,11 @@ fn test_pause_by_non_owner_fails() {
     let client = NeuroWealthVaultClient::new(&env, &contract_id);
 
     let agent = Address::generate(&env);
+    let owner = Address::generate(&env);
     let usdc_token = Address::generate(&env);
     let _non_owner = Address::generate(&env);
 
-    client.initialize(&agent, &usdc_token);
+    client.initialize(&owner, &agent, &usdc_token);
 
     // Verify vault starts unpaused
     assert!(!client.is_paused(), "Vault should start unpaused");
@@ -610,13 +612,13 @@ fn test_agent_can_trigger_emergency_pause() {
     let client = NeuroWealthVaultClient::new(&env, &contract_id);
 
     let agent = Address::generate(&env);
+    let owner = Address::generate(&env);
     let usdc_token = Address::generate(&env);
 
-    client.initialize(&agent, &usdc_token);
+    client.initialize(&owner, &agent, &usdc_token);
 
-    // Agent is the owner by default (set in initialize)
-    // Agent can trigger emergency pause
-    client.emergency_pause(&agent);
+    // Owner and agent are distinct; owner can trigger emergency pause
+    client.emergency_pause(&owner);
     assert!(client.is_paused());
 }
 
@@ -629,12 +631,13 @@ fn test_only_owner_can_unpause() {
     let client = NeuroWealthVaultClient::new(&env, &contract_id);
 
     let agent = Address::generate(&env);
+    let owner = Address::generate(&env);
     let usdc_token = Address::generate(&env);
 
-    client.initialize(&agent, &usdc_token);
+    client.initialize(&owner, &agent, &usdc_token);
 
     // Owner pauses
-    client.pause(&agent);
+    client.pause(&owner);
     assert!(client.is_paused());
 
     // Only owner can unpause
@@ -886,4 +889,3 @@ fn test_withdraw_all_reconciles_partial_blend_redemption() {
     // Vault accounting should be consistent
     assert_eq!(client.get_total_assets(), 10_000_000_i128);
 }
-

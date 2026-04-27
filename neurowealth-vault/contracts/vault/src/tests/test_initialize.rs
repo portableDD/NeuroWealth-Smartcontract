@@ -12,14 +12,15 @@ fn test_initialize_happy_path() {
     let client = NeuroWealthVaultClient::new(&env, &contract_id);
 
     let agent = Address::generate(&env);
+    let owner = Address::generate(&env);
     let usdc_token = Address::generate(&env);
 
-    client.initialize(&agent, &usdc_token);
+    client.initialize(&owner, &agent, &usdc_token);
 
     // Verify initialization
     assert_eq!(client.get_agent(), agent);
     assert_eq!(client.get_usdc_token(), usdc_token);
-    assert_eq!(client.get_owner(), agent); // Owner defaults to agent
+    assert_eq!(client.get_owner(), owner);
     assert!(!client.is_paused());
     assert_eq!(client.get_version(), 1u32);
     assert_eq!(client.get_total_deposits(), 0);
@@ -36,11 +37,12 @@ fn test_double_initialize_panics() {
     let client = NeuroWealthVaultClient::new(&env, &contract_id);
 
     let agent = Address::generate(&env);
+    let owner = Address::generate(&env);
     let usdc_token = Address::generate(&env);
 
-    client.initialize(&agent, &usdc_token);
+    client.initialize(&owner, &agent, &usdc_token);
     // Second call should panic with "vault: already initialized"
-    client.initialize(&agent, &usdc_token);
+    client.initialize(&owner, &agent, &usdc_token);
 }
 
 #[test]
@@ -91,9 +93,10 @@ fn test_initialize_emits_event() {
     let client = NeuroWealthVaultClient::new(&env, &contract_id);
 
     let agent = Address::generate(&env);
+    let owner = Address::generate(&env);
     let usdc_token = Address::generate(&env);
 
-    client.initialize(&agent, &usdc_token);
+    client.initialize(&owner, &agent, &usdc_token);
 
     let events = env.events().all();
     assert!(!events.is_empty(), "Initialization should emit an event");
