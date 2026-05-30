@@ -268,6 +268,21 @@ pub struct UpgradedEvent {
 2. **Deposit/Withdraw Events**: Calculate TVL and user activity metrics
 3. **Rebalance Events**: Track strategy performance over time
 
+## Frontend Integration: Preview Functions
+
+Frontend applications should use the preview functions to display expected conversion amounts before users submit transactions:
+
+### `preview_deposit_to_shares(assets)`
+Predicts shares minted for a deposit. Uses **floor** rounding (user may receive slightly fewer shares than exact division).
+
+### `preview_shares_to_assets(shares)`
+Predicts assets returned for a given share amount. Uses **floor** rounding.
+
+### `preview_withdraw(assets)` *(Recommended for withdraw preview)*
+Predicts shares burned for a withdrawal. Uses **ceiling** rounding to match actual `withdraw()` behavior. This is the correct function to show users how many shares will be burned before confirming a withdrawal.
+
+**Important:** In partial liquidity scenarios (when Blend protocol returns less than requested), the actual withdrawal amount may be less than expected. The preview functions always assume full liquidity. Frontends should display: *"Amount may vary based on pool liquidity"* when the vault has funds deployed in Blend.
+
 ## Event Testing
 
 The contract includes comprehensive tests that verify:

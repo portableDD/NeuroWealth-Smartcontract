@@ -21,7 +21,20 @@
 //!   - Bootstrap case: when `total_shares == 0 || total_assets == 0`, `shares_to_mint = assets`
 //! - `assets_to_return = (shares * total_assets) / total_shares`
 //!
+//! ## Rounding Policy (ERC-4626 Best Practice)
+//!
+//! This contract follows the ERC-4626 rounding convention:
+//! - **Floor mint**: When depositing, shares minted are rounded DOWN to protect the vault.
+//!   - `shares_to_mint = floor(assets * total_shares / total_assets)`
+//! - **Ceil burn**: When withdrawing, shares burned are rounded UP to protect the vault.
+//!   - `shares_to_burn = ceil(assets * total_shares / total_assets)`
+//! - **Floor return**: When converting burned shares to returned assets, assets are rounded DOWN.
+//!   - `assets_to_return = floor(shares * total_assets / total_shares)`
+//!
 //! This ensures:
+//! - The vault never loses value due to rounding
+//! - Dust attacks are prevented (at least 1 share burned when assets > 0)
+//! - Users cannot gain from rounding
 //! - Automatic yield growth tracking
 //! - Fair distribution of earnings
 //! - Mathematically consistent deposits and withdrawals
@@ -1744,10 +1757,7 @@ impl NeuroWealthVault {
     /// The current maximum deposit limit in USDC units (7 decimal places)
     pub fn get_max_deposit(env: Env) -> i128 {
         Self::require_initialized(&env);
-        env.storage()
-            .instance()
-            .get(&DataKey::MaxDeposit)
-            .unwrap_or(DEFAULT_MAX_DEPOSIT)
+        Self::get_max_deposit_internal(&env)
     }
 
     /// Updates the authorized AI agent address.
@@ -2296,6 +2306,28 @@ impl NeuroWealthVault {
         Self::convert_to_assets_internal(&env, shares)
     }
 
+    /// Previews the number of shares that would be burned for a given asset withdrawal.
+    ///
+    /// Unlike `preview_deposit_to_shares` (which uses floor), this function uses
+    /// ceiling division to match the actual `withdraw` behavior (ceil burn).
+    /// This ensures frontends can accurately display expected share burn before
+    /// a user submits a withdrawal transaction.
+    ///
+    /// NOTE: In partial liquidity scenarios (when Blend returns less than requested),
+    /// the actual shares burned may differ from this preview. This preview always
+    /// assumes full liquidity is available.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `assets` - The amount of USDC to withdraw (7 decimal places)
+    ///
+    /// # Returns
+    /// The number of shares that would be burned
+    pub fn preview_withdraw(env: Env, assets: i128) -> i128 {
+        Self::require_initialized(&env);
+        Self::convert_to_shares_internal_ceil(&env, assets)
+    }
+
     /// Converts an asset amount (USDC) to the corresponding number of shares,
     /// using the current share price.
     pub fn convert_to_shares(env: Env, assets: i128) -> i128 {
@@ -2547,12 +2579,17 @@ impl NeuroWealthVault {
     /// - If amount > maximum deposit
     #[inline]
     fn require_maximum_deposit(env: &Env, amount: i128) {
-        let max_deposit: i128 = env
+        let max_deposit: i128 = Self::get_max_deposit_internal(env);
+        assert!(amount <= max_deposit, "vault: maximum deposit exceeded");
+    }
+
+    #[inline]
+    fn get_max_deposit_internal(env: &Env) -> i128 {
+        env
             .storage()
             .instance()
             .get(&DataKey::MaxDeposit)
-            .unwrap_or(i128::MAX);
-        assert!(amount <= max_deposit, "vault: maximum deposit exceeded");
+            .unwrap_or(DEFAULT_MAX_DEPOSIT)
     }
 
     /// Validates that a deposit is within the user's cap.
