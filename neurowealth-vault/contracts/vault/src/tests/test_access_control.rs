@@ -640,3 +640,57 @@ fn test_agent_cannot_upgrade() {
     // agent is distinct from owner, so this should panic
     client.upgrade(&agent, &fake_wasm_hash);
 }
+
+// ============================================================================
+// ISSUE #118 — OWNER CANNOT EXECUTE AGENT-ONLY FUNCTIONS
+// ============================================================================
+
+/// Verifies that the owner cannot impersonate the agent in update_total_assets,
+/// which performs an explicit assert_eq!(agent, stored_agent) guard.
+#[test]
+#[should_panic(expected = "vault: only agent can update total assets")]
+fn test_owner_cannot_update_total_assets() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, owner, usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let user = Address::generate(&env);
+    mint_and_deposit(&env, &client, &usdc_token, &user, 5_000_000_i128);
+
+    // owner passed where agent is expected — must be rejected
+    client.update_total_assets(&owner, &5_000_000_i128, &false, &0);
+}
+
+/// Verifies that a completely unrelated address cannot impersonate the agent.
+#[test]
+#[should_panic(expected = "vault: only agent can update total assets")]
+fn test_stranger_cannot_update_total_assets() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let user = Address::generate(&env);
+    mint_and_deposit(&env, &client, &usdc_token, &user, 5_000_000_i128);
+
+    let stranger = Address::generate(&env);
+    client.update_total_assets(&stranger, &5_000_000_i128, &false, &0);
+}
+
+/// Verifies that the agent cannot pause the vault (owner-only via explicit address check).
+/// Complements existing test_agent_cannot_pause with a clear issue-#118 label.
+#[test]
+#[should_panic(expected = "vault: only owner can pause")]
+fn test_agent_cannot_pause_owner_role_is_exclusive() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    // agent != owner — the explicit assert_eq! in pause() must reject this
+    client.pause(&agent);
+}

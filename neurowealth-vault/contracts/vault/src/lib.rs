@@ -262,6 +262,7 @@ pub struct PauseEvent {
 /// - `SymbolShort("vault_initialized")` - Event identifier
 #[contracttype]
 pub struct VaultInitializedEvent {
+    pub owner: Address,
     pub agent: Address,
     pub usdc_token: Address,
     pub tvl_cap: i128,
@@ -731,6 +732,7 @@ impl NeuroWealthVault {
         env.events().publish(
             (TOPIC_INIT,),
             VaultInitializedEvent {
+                owner: owner.clone(),
                 agent: agent.clone(),
                 usdc_token: usdc_token.clone(),
                 tvl_cap,

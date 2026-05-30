@@ -246,3 +246,105 @@ fn test_deposit_uses_default_minimum_when_key_missing() {
 
     client.deposit(&user, &below_default_min);
 }
+
+// ============================================================================
+// ISSUE #119 — REJECT NEGATIVE VALUES IN TVL AND PER-USER CAP SETTERS
+// ============================================================================
+
+// ---- set_tvl_cap ------------------------------------------------------------
+
+#[test]
+#[should_panic(expected = "vault: tvl cap cannot be negative")]
+fn test_set_tvl_cap_rejects_negative() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    client.set_tvl_cap(&-1_i128);
+}
+
+/// Zero is a valid TVL cap meaning "no cap enforced".
+#[test]
+fn test_set_tvl_cap_accepts_zero() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    client.set_tvl_cap(&0_i128);
+    assert_eq!(client.get_tvl_cap(), 0);
+}
+
+// ---- set_user_deposit_cap ---------------------------------------------------
+
+#[test]
+#[should_panic(expected = "vault: user deposit cap cannot be negative")]
+fn test_set_user_deposit_cap_rejects_negative() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    client.set_user_deposit_cap(&-1_i128);
+}
+
+/// Zero is a valid per-user cap meaning "no cap enforced".
+#[test]
+fn test_set_user_deposit_cap_accepts_zero() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    client.set_user_deposit_cap(&0_i128);
+    assert_eq!(client.get_user_deposit_cap(), 0);
+}
+
+// ---- set_limits (deprecated) ------------------------------------------------
+
+#[test]
+#[should_panic(expected = "vault: min limit cannot be negative")]
+fn test_set_limits_rejects_negative_min() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    #[allow(deprecated)]
+    client.set_limits(&-1_i128, &100_000_000_i128);
+}
+
+#[test]
+#[should_panic(expected = "vault: max limit cannot be negative")]
+fn test_set_limits_rejects_negative_max() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    #[allow(deprecated)]
+    client.set_limits(&0_i128, &-1_i128);
+}
+
+/// Zero values for both caps are valid (means unlimited for each).
+#[test]
+fn test_set_limits_accepts_zero_values() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    #[allow(deprecated)]
+    client.set_limits(&0_i128, &0_i128);
+
+    assert_eq!(client.get_user_deposit_cap(), 0);
+    assert_eq!(client.get_tvl_cap(), 0);
+}
