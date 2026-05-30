@@ -606,3 +606,100 @@ fn test_integration_blend_withdraw_event_fields_on_protocol_switch() {
     );
     assert!(evt.success, "Withdrawal event must be marked successful");
 }
+
+// ============================================================================
+// 7. CANONICAL FULL-LIFECYCLE FLOW
+// ============================================================================
+
+/// Canonical end-to-end scenario covering the full vault lifecycle:
+/// 1. Dual-user deposit
+/// 2. Deployment to protocol (Blend)
+/// 3. Yield accrual (Price inflation)
+/// 4. Withdrawal from protocol
+/// 5. Rebalance back to idle
+/// 6. Final withdrawal with yield
+#[test]
+fn test_integration_canonical_full_lifecycle_flow() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, agent, owner, usdc_token, blend_pool) = setup_vault_with_token_and_blend(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+    let token_client = TestTokenClient::new(&env, &usdc_token);
+    let blend_client = MockBlendPoolClient::new(&env, &blend_pool);
+
+    // Initial setup: Configure blend pool
+    client.set_blend_pool(&owner, &blend_pool);
+
+    // --- STEP 1: Dual-user deposit ---
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+    let amount_a = 10_000_000_i128; // 10 USDC
+    let amount_b = 10_000_000_i128; // 10 USDC
+    let initial_total = amount_a + amount_b;
+
+    mint_and_deposit(&env, &client, &usdc_token, &user_a, amount_a);
+    mint_and_deposit(&env, &client, &usdc_token, &user_b, amount_b);
+
+    assert_eq!(client.get_total_assets(), initial_total);
+    assert_eq!(client.get_total_shares(), initial_total); // 1:1 initial price
+    assert_eq!(client.get_shares(&user_a), amount_a);
+
+    // --- STEP 2: Deployment to protocol (Blend) ---
+    client.rebalance(&symbol_short!("blend"), &750_i128);
+
+    assert_eq!(client.get_current_protocol(), symbol_short!("blend"));
+    assert_eq!(blend_client.supplied(&usdc_token), initial_total);
+    assert_eq!(vault_usdc_balance(&env, &usdc_token, &contract_id), 0);
+
+    // Verify Blend Supply Event
+    let supply_events = collect_blend_supply_events(&env);
+    assert!(supply_events.iter().any(|e| e.amount == initial_total));
+
+    // --- STEP 3: Yield Accrual (Price Inflation) ---
+    // Simulate 10% yield accrual by minting 2 USDC to vault address
+    let yield_amount = 2_000_000_i128; // 2 USDC
+    let total_with_yield = initial_total + yield_amount;
+    token_client.mint(&contract_id, &yield_amount);
+    client.update_total_assets(&agent, &total_with_yield, &false, &0);
+
+    assert_eq!(client.get_total_assets(), total_with_yield);
+    // Shares are still the same, so price per share has increased
+    // Price = 22,000,000 / 20,000,000 = 1.1 USDC/share
+    assert_eq!(client.get_total_shares(), initial_total);
+
+    // --- STEP 4: Withdrawal from Protocol ---
+    // User A withdraws their full position (including yield)
+    // Should burn 10M shares and receive 11M USDC
+    let expected_withdraw_a = 11_000_000_i128;
+    client.withdraw(&user_a, &expected_withdraw_a);
+
+    assert_eq!(token_client.balance(&user_a), expected_withdraw_a);
+    assert_eq!(client.get_shares(&user_a), 0);
+    assert_eq!(client.get_total_shares(), 10_000_000_i128); // User B's shares remaining
+    assert_eq!(client.get_total_assets(), 11_000_000_i128); // User B's assets remaining
+
+    // Verify protocol withdrawal occurred
+    let withdraw_events = collect_blend_withdraw_events(&env);
+    assert!(!withdraw_events.is_empty());
+
+    // --- STEP 5: Rebalance back to idle ---
+    client.rebalance(&symbol_short!("none"), &0_i128);
+
+    assert_eq!(client.get_current_protocol(), symbol_short!("none"));
+    assert_eq!(blend_client.supplied(&usdc_token), 0);
+    assert_eq!(vault_usdc_balance(&env, &usdc_token, &contract_id), 11_000_000_i128);
+
+    // --- STEP 6: Final withdrawal with yield ---
+    // User B withdraws remaining funds
+    let expected_withdraw_b = 11_000_000_i128;
+    client.withdraw(&user_b, &expected_withdraw_b);
+
+    assert_eq!(token_client.balance(&user_b), expected_withdraw_b);
+    assert_eq!(client.get_total_assets(), 0);
+    assert_eq!(client.get_total_shares(), 0);
+
+    // FINAL CHECK: All invariants hold
+    assert_eq!(client.get_total_deposits(), 0);
+    assert_eq!(vault_usdc_balance(&env, &usdc_token, &contract_id), 0);
+}
