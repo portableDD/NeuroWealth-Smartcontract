@@ -135,7 +135,7 @@ fn test_rebalance_blocked_while_paused() {
     assert!(client.is_paused());
 
     // require_not_paused fires before any blend check
-    client.rebalance(&soroban_sdk::symbol_short!("blend"), &500_i128);
+    client.rebalance(&soroban_sdk::symbol_short!("blend"), &500_i128, &0_i128);
 }
 
 #[test]

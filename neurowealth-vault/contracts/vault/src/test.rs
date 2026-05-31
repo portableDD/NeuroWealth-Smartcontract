@@ -829,7 +829,7 @@ fn test_withdraw_reconciles_partial_blend_redemption() {
     client.deposit(&user, &deposit_amount);
 
     // 2. Rebalance to Blend
-    client.rebalance(&symbol_short!("blend"), &800_i128);
+    client.rebalance(&symbol_short!("blend"), &800_i128, &0_i128);
 
     // Verify funds moved to pool
     assert_eq!(token_client.balance(&contract_id), 0);
@@ -873,7 +873,7 @@ fn test_withdraw_all_reconciles_partial_blend_redemption() {
     client.deposit(&user, &deposit_amount);
 
     // 2. Rebalance to Blend
-    client.rebalance(&symbol_short!("blend"), &800_i128);
+    client.rebalance(&symbol_short!("blend"), &800_i128, &0_i128);
 
     // 3. User attempts to withdraw_all (entitled to 20 USDC)
     // MockBlendPool will only return 10 USDC (half of its 20 USDC balance)

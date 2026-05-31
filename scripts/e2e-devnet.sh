@@ -422,7 +422,8 @@ REBALANCE_OUTPUT=$(run_soroban "Rebalance to 'none' protocol" \
   -- \
   rebalance \
   --protocol "none" \
-  --expected_apy "0" 2>&1) || {
+  --expected_apy "0" \
+  --min_out "0" 2>&1) || {
   record_fail "rebalance_none" "Rebalance failed: $REBALANCE_OUTPUT"
   REBALANCE_OUTPUT="FAILED: $REBALANCE_OUTPUT"
 }
