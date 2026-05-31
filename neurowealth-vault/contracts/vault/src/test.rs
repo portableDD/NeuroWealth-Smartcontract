@@ -6,68 +6,10 @@ use soroban_sdk::{
 };
 
 // ============================================================================
-// SIMPLE TEST TOKEN CONTRACT
+// SIMPLE TEST TOKEN CONTRACT (Imported from shared test utils)
 // ============================================================================
 
-#[contracttype]
-enum TokenDataKey {
-    Balance(Address),
-}
-
-mod token {
-    use super::*;
-
-    #[contract]
-    pub struct TestToken;
-
-    #[contractimpl]
-    impl TestToken {
-        pub fn mint(env: Env, to: Address, amount: i128) {
-            let balance: i128 = env
-                .storage()
-                .persistent()
-                .get(&TokenDataKey::Balance(to.clone()))
-                .unwrap_or(0);
-            env.storage()
-                .persistent()
-                .set(&TokenDataKey::Balance(to), &(balance + amount));
-        }
-
-        pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
-            from.require_auth();
-            assert!(amount > 0, "amount must be positive");
-
-            let from_balance: i128 = env
-                .storage()
-                .persistent()
-                .get(&TokenDataKey::Balance(from.clone()))
-                .unwrap_or(0);
-            assert!(from_balance >= amount, "insufficient balance");
-
-            let to_balance: i128 = env
-                .storage()
-                .persistent()
-                .get(&TokenDataKey::Balance(to.clone()))
-                .unwrap_or(0);
-
-            env.storage()
-                .persistent()
-                .set(&TokenDataKey::Balance(from), &(from_balance - amount));
-            env.storage()
-                .persistent()
-                .set(&TokenDataKey::Balance(to), &(to_balance + amount));
-        }
-
-        pub fn balance(env: Env, owner: Address) -> i128 {
-            env.storage()
-                .persistent()
-                .get(&TokenDataKey::Balance(owner))
-                .unwrap_or(0)
-        }
-    }
-}
-
-use token::{TestToken, TestTokenClient};
+use crate::comprehensive_tests::utils::{TestToken, TestTokenClient};
 
 
 // ============================================================================

@@ -705,3 +705,174 @@ fn test_preview_withdraw_edge_cases() {
         "preview_withdraw with large amount should not be negative"
     );
 }
+
+// ============================================================================
+// RANDOMIZED PROPERTY TESTS
+// ============================================================================
+
+struct SimplePrng {
+    state: u64,
+}
+
+impl SimplePrng {
+    fn new(seed: u64) -> Self {
+        Self { state: seed }
+    }
+
+    // Simple LCG random generator
+    fn next_u64(&mut self) -> u64 {
+        self.state = self.state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.state
+    }
+
+    fn next_range(&mut self, min: i128, max: i128) -> i128 {
+        assert!(max >= min);
+        let range = (max - min + 1) as u64;
+        if range == 0 {
+            return min;
+        }
+        let val = self.next_u64() % range;
+        min + val as i128
+    }
+}
+
+/// Property Test 1: Deposit then withdraw never increases shares
+#[test]
+fn test_property_deposit_withdraw_never_increases_shares() {
+    let mut prng = SimplePrng::new(42);
+
+    for _ in 0..100 {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (contract_id, agent, _owner, usdc_token) = setup_vault_with_token(&env);
+        let client = NeuroWealthVaultClient::new(&env, &contract_id);
+        let token_client = TestTokenClient::new(&env, &usdc_token);
+
+        let user1 = Address::generate(&env);
+        let user2 = Address::generate(&env);
+
+        // Generate randomized initial deposit (1 USDC to 10,000 USDC)
+        let initial_deposit = prng.next_range(1_000_000, 10_000_000_000);
+        mint_and_deposit(&env, &client, &usdc_token, &user1, initial_deposit);
+
+        // Generate optional yield (0 USDC to 5,000 USDC)
+        let yield_amount = prng.next_range(0, 5_000_000_000);
+        if yield_amount > 0 {
+            token_client.mint(&contract_id, &yield_amount);
+            client.update_total_assets(&agent, &(initial_deposit + yield_amount), &false, &0);
+        }
+
+        // Generate randomized subsequent deposit
+        let subsequent_deposit = prng.next_range(1_000_000, 10_000_000_000);
+        
+        // Check shares minted for the subsequent deposit
+        let shares_minted = client.preview_deposit_to_shares(&subsequent_deposit);
+        
+        // Perform actual deposit
+        mint_and_deposit(&env, &client, &usdc_token, &user2, subsequent_deposit);
+        let actual_shares = client.get_shares(&user2);
+        assert_eq!(shares_minted, actual_shares);
+
+        // If they withdraw the same amount of assets they just deposited
+        let shares_burned = client.preview_withdraw(&subsequent_deposit);
+
+        // INVARIANT: The shares burned on withdrawal of `subsequent_deposit` assets
+        // must be at least the shares minted on deposit of `subsequent_deposit` assets.
+        // This ensures the deposit-then-withdraw cycle never increases the user's shares.
+        assert!(
+            shares_burned >= shares_minted,
+            "Invariant Violation: shares_burned ({}) < shares_minted ({}) for deposit/withdraw of {}",
+            shares_burned,
+            shares_minted,
+            subsequent_deposit
+        );
+
+        // DUAL INVARIANT: If they withdraw exactly the shares they got,
+        // the assets returned must never exceed the assets they deposited.
+        let assets_returned = client.preview_shares_to_assets(&shares_minted);
+        assert!(
+            assets_returned <= subsequent_deposit,
+            "Invariant Violation: assets_returned ({}) > subsequent_deposit ({})",
+            assets_returned,
+            subsequent_deposit
+        );
+    }
+}
+
+/// Property Test 2: Total shares conserved on transfers and updates
+#[test]
+fn test_property_total_shares_conserved_on_transfers() {
+    let mut prng = SimplePrng::new(1337);
+
+    for _ in 0..100 {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (contract_id, agent, _owner, usdc_token) = setup_vault_with_token(&env);
+        let client = NeuroWealthVaultClient::new(&env, &contract_id);
+        let token_client = TestTokenClient::new(&env, &usdc_token);
+
+        let user1 = Address::generate(&env);
+        let user2 = Address::generate(&env);
+        let user3 = Address::generate(&env);
+
+        // 1. Initial deposits to establish user shares
+        let deposit1 = prng.next_range(1_000_000, 10_000_000_000);
+        let deposit2 = prng.next_range(1_000_000, 10_000_000_000);
+        let deposit3 = prng.next_range(1_000_000, 10_000_000_000);
+
+        mint_and_deposit(&env, &client, &usdc_token, &user1, deposit1);
+        mint_and_deposit(&env, &client, &usdc_token, &user2, deposit2);
+        mint_and_deposit(&env, &client, &usdc_token, &user3, deposit3);
+
+        let total_shares_before = client.get_total_shares();
+        let user1_shares = client.get_shares(&user1);
+        let user2_shares = client.get_shares(&user2);
+        let user3_shares = client.get_shares(&user3);
+
+        // Invariant: total shares must equal sum of user shares
+        assert_eq!(total_shares_before, user1_shares + user2_shares + user3_shares);
+
+        // 2. Perform direct token transfers of the underlying token (USDC)
+        // This simulates users sending USDC directly between themselves or to external parties.
+        // It must NOT affect their shares in the vault, nor the total vault shares.
+        let transfer_amount = prng.next_range(1, 500_000);
+        token_client.mint(&user1, &transfer_amount);
+        token_client.transfer(&user1, &user2, &transfer_amount);
+
+        // Invariant: Vault total shares and user vault shares must remain perfectly constant
+        assert_eq!(client.get_total_shares(), total_shares_before);
+        assert_eq!(client.get_shares(&user1), user1_shares);
+        assert_eq!(client.get_shares(&user2), user2_shares);
+        assert_eq!(client.get_shares(&user3), user3_shares);
+
+        // 3. Perform direct token transfer to the vault contract address ("donation")
+        // Direct transfers bypass the deposit/withdraw functions.
+        // This must not alter total shares.
+        let donation_amount = prng.next_range(1, 10_000_000);
+        token_client.mint(&user3, &donation_amount);
+        token_client.transfer(&user3, &contract_id, &donation_amount);
+
+        // Invariant: total shares must remain perfectly conserved
+        assert_eq!(client.get_total_shares(), total_shares_before);
+        assert_eq!(client.get_shares(&user1), user1_shares);
+        assert_eq!(client.get_shares(&user2), user2_shares);
+        assert_eq!(client.get_shares(&user3), user3_shares);
+
+        // 4. Update total assets (simulating yield accrual)
+        // Yield updates the exchange rate but must NOT alter total shares or individual shares.
+        let yield_amount = prng.next_range(0, 1_000_000_000);
+        if yield_amount > 0 {
+            token_client.mint(&contract_id, &yield_amount);
+            let total_assets_new = deposit1 + deposit2 + deposit3 + donation_amount + yield_amount;
+            client.update_total_assets(&agent, &total_assets_new, &false, &0);
+        }
+
+        // Invariant: total shares must remain conserved
+        assert_eq!(client.get_total_shares(), total_shares_before);
+        assert_eq!(client.get_shares(&user1), user1_shares);
+        assert_eq!(client.get_shares(&user2), user2_shares);
+        assert_eq!(client.get_shares(&user3), user3_shares);
+    }
+}

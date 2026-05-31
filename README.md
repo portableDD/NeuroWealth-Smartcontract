@@ -105,8 +105,8 @@ bash# Install Rust and the wasm target
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 rustup target add wasm32-unknown-unknown
 
-# Install Stellar CLI
-cargo install --locked stellar-cli --features opt
+# Install Stellar CLI (Pinned to version 21.2.0)
+cargo install --locked stellar-cli --version 21.2.0 --features opt
 
 # Install Node.js dependencies (for agent and frontend)
 npm install
