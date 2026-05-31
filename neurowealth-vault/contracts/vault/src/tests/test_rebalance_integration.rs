@@ -130,7 +130,7 @@ fn test_integration_rebalance_to_blend_with_pool_configured() {
         "BlendSupplyEvent must be emitted"
     );
     let supply_event = supply_events.last().unwrap();
-    assert_eq!(supply_event.amount, deposit_amount);
+    assert_eq!(supply_event.amount_actual, deposit_amount);
     assert!(supply_event.success);
 
     let rebalance_events = collect_rebalance_events(&env);
@@ -287,8 +287,7 @@ fn test_integration_rebalance_from_blend_to_none_withdraws_all() {
     let wd_events = collect_blend_withdraw_events(&env);
     assert!(!wd_events.is_empty(), "BlendWithdrawEvent must be emitted");
     let wd_event = wd_events.last().unwrap();
-    assert_eq!(wd_event.requested_amount, deposit_amount);
-    assert_eq!(wd_event.amount_received, deposit_amount);
+    assert_eq!(wd_event.amount_actual, deposit_amount);
     assert!(wd_event.success, "Withdrawal should be marked successful");
 
     let rebalance_events = collect_rebalance_events(&env);
@@ -383,8 +382,9 @@ fn test_integration_full_protocol_round_trip() {
 ///
 /// Note: The contract only writes CurrentProtocol = "blend" inside
 /// `supply_to_blend`, which is guarded by `vault_balance > 0`.
-/// With zero balance that branch is skipped, so CurrentProtocol stays "none".
-/// This is correct and deterministic behaviour.
+/// When vault balance is zero, rebalance to blend is a noop but must update
+/// CurrentProtocol to "blend" so protocol tracking is always consistent with
+/// the agent's intent (Issue #146).
 #[test]
 fn test_integration_rebalance_blend_zero_vault_balance_no_panic() {
     let env = Env::default();
@@ -399,12 +399,12 @@ fn test_integration_rebalance_blend_zero_vault_balance_no_panic() {
     // No deposit — vault has zero balance; this must NOT panic
     client.rebalance(&symbol_short!("blend"), &400_i128, &0_i128);
 
-    // With zero vault balance the supply branch is skipped entirely, so
-    // CurrentProtocol remains "none" — still deterministic and safe.
+    // Even with zero vault balance, CurrentProtocol must be updated to "blend"
+    // so state reflects the agent's intent (Issue #146).
     assert_eq!(
         client.get_current_protocol(),
-        symbol_short!("none"),
-        "CurrentProtocol stays 'none' when vault_balance == 0 and no supply occurs"
+        symbol_short!("blend"),
+        "CurrentProtocol must update to 'blend' even when no funds are moved"
     );
 
     let rebalance_events = collect_rebalance_events(&env);
@@ -576,12 +576,12 @@ fn test_integration_blend_supply_event_fields_are_correct() {
         evt.asset, usdc_token,
         "BlendSupplyEvent.asset must be the USDC token"
     );
-    assert_eq!(evt.amount, deposit_amount);
+    assert_eq!(evt.amount_actual, deposit_amount);
     assert!(evt.success);
 }
 
 /// Validates that a Blend withdrawal emits BlendWithdrawEvent with correct
-/// requested_amount, amount_received, and success fields.
+/// amount_actual and success fields.
 #[test]
 fn test_integration_blend_withdraw_event_fields_on_protocol_switch() {
     let env = Env::default();
@@ -606,12 +606,8 @@ fn test_integration_blend_withdraw_event_fields_on_protocol_switch() {
 
     let evt = wd_events.last().unwrap();
     assert_eq!(
-        evt.requested_amount, deposit_amount,
-        "Requested amount should match full deposited balance"
-    );
-    assert_eq!(
-        evt.amount_received, deposit_amount,
-        "Amount received should match requested (full withdrawal)"
+        evt.amount_actual, deposit_amount,
+        "Amount actual should match full deposited balance"
     );
     assert!(evt.success, "Withdrawal event must be marked successful");
 }

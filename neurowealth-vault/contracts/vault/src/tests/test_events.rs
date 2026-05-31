@@ -766,11 +766,11 @@ fn test_blend_supply_event_reports_actual_supplied_with_shortfall() {
 
     // CRITICAL: Event must report actual supplied (3M), NOT requested (9M)
     assert_eq!(
-        event.amount, 3_000_000_i128,
+        event.amount_actual, 3_000_000_i128,
         "Event must report actual supplied amount, not requested amount"
     );
     assert!(
-        event.amount < 9_000_000_i128,
+        event.amount_actual < 9_000_000_i128,
         "Actual supplied should be less than requested due to shortfall"
     );
     assert!(
@@ -866,11 +866,11 @@ fn test_blend_withdraw_event_reports_actual_withdrawn_with_shortfall() {
     // CRITICAL: Event must report actual received (500K), NOT requested (2M)
     let expected_pool_withdrawn = 500_000_i128;
     assert_eq!(
-        event.amount_received, expected_pool_withdrawn,
+        event.amount_actual, expected_pool_withdrawn,
         "Event must report actual received from pool, not requested amount"
     );
     assert!(
-        event.amount_received < event.requested_amount,
+        event.amount_actual < requested_withdraw,
         "Actual received should be less than requested due to pool shortfall"
     );
     assert!(

@@ -158,8 +158,8 @@ fn test_event_schema_administrative_events() {
     );
 
     let (_, _, data) = &tvl_events[0];
-    let tvl_event = TvlCapUpdatedEvent::try_from_val(&env, data)
-        .expect("Should be a valid TvlCapUpdatedEvent");
+    let tvl_event =
+        TvlCapUpdatedEvent::try_from_val(&env, data).expect("Should be a valid TvlCapUpdatedEvent");
     assert_eq!(tvl_event.new_cap, new_tvl_cap);
 
     // Test User cap update event
@@ -229,8 +229,7 @@ fn test_event_schema_protocol_changed_events() {
 
     client.rebalance(&symbol_short!("blend"), &1200_i128, &0_i128);
 
-    let proto_events =
-        find_events_by_topic(env.events().all(), &env, TOPIC_PROTOCOL_CHANGED);
+    let proto_events = find_events_by_topic(env.events().all(), &env, TOPIC_PROTOCOL_CHANGED);
     assert_eq!(
         proto_events.len(),
         1,
@@ -245,8 +244,7 @@ fn test_event_schema_protocol_changed_events() {
 
     client.rebalance(&symbol_short!("none"), &500_i128, &0_i128);
 
-    let proto_events =
-        find_events_by_topic(env.events().all(), &env, TOPIC_PROTOCOL_CHANGED);
+    let proto_events = find_events_by_topic(env.events().all(), &env, TOPIC_PROTOCOL_CHANGED);
     assert_eq!(
         proto_events.len(),
         2,
@@ -427,7 +425,7 @@ fn test_event_schema_blend_events() {
 
     // Verify payload structure
     assert_eq!(supply_event.asset, usdc_token);
-    assert_eq!(supply_event.amount, 10_000_000_i128);
+    assert_eq!(supply_event.amount_actual, 10_000_000_i128);
     assert!(supply_event.success);
 
     // Test rebalance back to none (should emit BlendWithdrawEvent)
@@ -446,8 +444,7 @@ fn test_event_schema_blend_events() {
 
     // Verify payload structure
     assert_eq!(withdraw_event.asset, usdc_token);
-    assert_eq!(withdraw_event.requested_amount, 10_000_000_i128);
-    assert_eq!(withdraw_event.amount_received, 10_000_000_i128);
+    assert_eq!(withdraw_event.amount_actual, 10_000_000_i128);
     assert!(withdraw_event.success);
 }
 
