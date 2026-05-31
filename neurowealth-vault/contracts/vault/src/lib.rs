@@ -432,8 +432,8 @@ pub struct UpgradedEvent {
 pub struct BlendSupplyEvent {
     /// The asset address (USDC)
     pub asset: Address,
-    /// Amount supplied to Blend
-    pub amount: i128,
+    /// Actual amount transferred to Blend (may be less than requested due to pool limits)
+    pub amount_actual: i128,
     /// Whether the supply was successful
     pub success: bool,
 }
@@ -446,12 +446,25 @@ pub struct BlendSupplyEvent {
 pub struct BlendWithdrawEvent {
     /// The asset address (USDC)
     pub asset: Address,
-    /// Amount requested to withdraw
-    pub requested_amount: i128,
-    /// Amount actually withdrawn
-    pub amount_received: i128,
+    /// Actual amount received from Blend (may be less than requested due to pool liquidity)
+    pub amount_actual: i128,
     /// Whether the withdrawal succeeded
     pub success: bool,
+}
+
+/// Emitted when a rebalance aborts due to a protocol exit failure.
+///
+/// Emitted instead of panicking so the failure is observable on-chain without
+/// reverting the transaction. State remains unchanged when this event fires.
+///
+/// # Topics
+/// - `SymbolShort("reb_fail")` - Event identifier
+#[contracttype]
+pub struct RebalanceFailedEvent {
+    /// The protocol the vault was trying to exit
+    pub from_protocol: Symbol,
+    /// Short reason code ("exit_fail" = incomplete withdrawal)
+    pub reason: Symbol,
 }
 
 #[contracttype]
@@ -511,6 +524,7 @@ pub(crate) const TOPIC_UPGRADED: Symbol = symbol_short!("upgraded");
 pub(crate) const TOPIC_BLEND_SUPPLY: Symbol = symbol_short!("blend_sup");
 pub(crate) const TOPIC_BLEND_WITHDRAW: Symbol = symbol_short!("blend_wd");
 pub(crate) const TOPIC_PROTOCOL_CHANGED: Symbol = symbol_short!("proto_chg");
+pub(crate) const TOPIC_REBALANCE_FAILED: Symbol = symbol_short!("reb_fail");
 
 impl BlendPoolClient {
     /// Deposits assets to the Blend pool.
@@ -1324,7 +1338,9 @@ impl NeuroWealthVault {
         let mut amount_attempted = 0_i128;
         let mut amount_moved = 0_i128;
 
-        // If switching protocols, withdraw from current protocol first
+        // If switching protocols, exit the current one first.
+        // On incomplete exit, emit RebalanceFailedEvent and abort — no further
+        // state mutations occur so the vault remains consistent (Issue #145).
         if current_protocol != protocol && current_protocol != symbol_short!("none") {
             let expected_withdrawal = Self::get_protocol_balance(&env, &current_protocol);
             amount_attempted = amount_attempted.saturating_add(expected_withdrawal);
@@ -1333,19 +1349,19 @@ impl NeuroWealthVault {
             amount_moved = amount_moved.saturating_add(withdrawn);
 
             if expected_withdrawal > 0 {
-                assert!(
-                    withdrawn >= expected_withdrawal,
-                    "vault: incomplete protocol exit - expected {}, got {}. aborting rebalance to prevent inconsistent state",
-                    expected_withdrawal,
-                    withdrawn
-                );
-
                 let remaining_balance = Self::get_protocol_balance(&env, &current_protocol);
-                assert!(
-                    remaining_balance == 0,
-                    "vault: protocol exit incomplete - {} still deployed after withdrawal. aborting rebalance",
-                    remaining_balance
-                );
+                if remaining_balance > 0 {
+                    // Protocol exit incomplete — abort rebalance gracefully so
+                    // the failure is observable without reverting the tx.
+                    env.events().publish(
+                        (TOPIC_REBALANCE_FAILED,),
+                        RebalanceFailedEvent {
+                            from_protocol: current_protocol,
+                            reason: symbol_short!("exit_fail"),
+                        },
+                    );
+                    return;
+                }
             }
         }
 
@@ -1371,6 +1387,9 @@ impl NeuroWealthVault {
                     status = symbol_short!("partial");
                 }
             } else if amount_moved == 0 {
+                // Noop: no funds to supply, but protocol target is blend.
+                // Update CurrentProtocol so tracking matches intent (Issue #146).
+                Self::set_current_protocol(&env, symbol_short!("blend"));
                 status = symbol_short!("noop");
             }
 
@@ -1395,19 +1414,18 @@ impl NeuroWealthVault {
                 amount_moved = amount_moved.saturating_add(withdrawn);
 
                 if expected_withdrawal > 0 {
-                    assert!(
-                        withdrawn >= expected_withdrawal,
-                        "vault: incomplete protocol exit - expected {}, got {}. aborting transition to none",
-                        expected_withdrawal,
-                        withdrawn
-                    );
-
                     let remaining_balance = Self::get_protocol_balance(&env, &current_protocol);
-                    assert!(
-                        remaining_balance == 0,
-                        "vault: protocol exit incomplete - {} still deployed after withdrawal. aborting transition to none",
-                        remaining_balance
-                    );
+                    if remaining_balance > 0 {
+                        // Protocol exit incomplete — abort gracefully (Issue #145).
+                        env.events().publish(
+                            (TOPIC_REBALANCE_FAILED,),
+                            RebalanceFailedEvent {
+                                from_protocol: current_protocol,
+                                reason: symbol_short!("exit_fail"),
+                            },
+                        );
+                        return;
+                    }
                 }
                 Self::set_current_protocol(&env, symbol_short!("none"));
             } else if amount_moved == 0 {
@@ -1954,10 +1972,12 @@ impl NeuroWealthVault {
         let stored_owner: Address = env.storage().instance().get(&DataKey::Owner).unwrap();
         assert_eq!(owner, stored_owner, "vault: only owner can set blend pool");
 
-        // NOTE: Skip validating the pool contract by calling into it here.
-        // Some tests provide a raw address (not a registered contract),
-        // and invoking an unregistered address will cause a HostError.
-        // If needed, a separate integration check can validate the pool.
+        // Validate pool interface by probing the `balance` function (Issue #148).
+        // If the address is not a valid Blend pool contract the invocation will
+        // panic here, rejecting the registration before the address is stored.
+        let usdc_token: Address = env.storage().instance().get(&DataKey::UsdcToken).unwrap();
+        let vault_address = env.current_contract_address();
+        BlendPoolClient::get_balance(&env, &pool_address, &usdc_token, &vault_address);
 
         env.storage()
             .instance()
@@ -3120,7 +3140,7 @@ impl NeuroWealthVault {
             (TOPIC_BLEND_SUPPLY,),
             BlendSupplyEvent {
                 asset: usdc_token,
-                amount: supplied,
+                amount_actual: supplied,
                 success: supplied > 0,
             },
         );
@@ -3191,8 +3211,7 @@ impl NeuroWealthVault {
             (TOPIC_BLEND_WITHDRAW,),
             BlendWithdrawEvent {
                 asset: usdc_token,
-                requested_amount: amount_to_withdraw,
-                amount_received: withdrawn,
+                amount_actual: withdrawn,
                 success: withdrawn > 0,
             },
         );

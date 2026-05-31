@@ -149,12 +149,23 @@ fn test_initialize_owner_and_agent_are_distinct() {
     let agent = Address::generate(&env);
     let usdc_token = Address::generate(&env);
 
-    assert_ne!(owner, agent, "precondition: owner and agent must be distinct addresses");
+    assert_ne!(
+        owner, agent,
+        "precondition: owner and agent must be distinct addresses"
+    );
 
     client.initialize(&deployer, &owner, &agent, &usdc_token, &salt);
 
-    assert_eq!(client.get_owner(), owner, "owner should be stored under Owner key");
-    assert_eq!(client.get_agent(), agent, "agent should be stored under Agent key");
+    assert_eq!(
+        client.get_owner(),
+        owner,
+        "owner should be stored under Owner key"
+    );
+    assert_eq!(
+        client.get_agent(),
+        agent,
+        "agent should be stored under Agent key"
+    );
     assert_ne!(
         client.get_owner(),
         client.get_agent(),
@@ -286,5 +297,11 @@ fn test_front_runner_with_own_address_as_deployer_is_rejected() {
     // require_auth() with their own keys, but the derived contract address
     // will not match contract_id → "vault: unauthorized deployer".
     let attacker = Address::generate(&env);
-    client.initialize(&attacker, &attacker_owner, &attacker_agent, &usdc_token, &salt);
+    client.initialize(
+        &attacker,
+        &attacker_owner,
+        &attacker_agent,
+        &usdc_token,
+        &salt,
+    );
 }
