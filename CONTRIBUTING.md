@@ -6,11 +6,11 @@ This guide will help you get started with our development process, issue labelin
 
 ## Table of Contents
 - [Good First Issues](#good-first-issues)
+- [Reporting Issues](#reporting-issues)
 - [Development Setup](#development-setup)
   - [Prerequisites](#prerequisites)
   - [Building the Contract](#building-the-contract)
   - [Running Tests](#running-tests)
-- [Issue Labeling](#issue-labeling)
 - [CI Requirements](#ci-requirements)
 - [Coding Standards](#coding-standards)
 - [Submitting a Pull Request](#submitting-a-pull-request)
@@ -18,6 +18,55 @@ This guide will help you get started with our development process, issue labelin
 ## Good First Issues
 
 If you're new to the project, a great place to start is our [good first issues](https://github.com/NeuroWealth/NeuroWealth-Smartcontract/issues?q=is%3Aopen+is%3Aissue+label%3A%22good+first+issue%22). These are typically smaller tasks that help you get familiar with the codebase.
+
+## Reporting Issues
+
+We use standardized issue templates to ensure that bug reports and feature requests contain all the necessary information for the team to respond effectively.
+
+### Bug Reports
+
+Use the [bug report template](/.github/ISSUE_TEMPLATE/bug_report.md) when:
+- You've found a defect in the smart contract
+- You've encountered unexpected behavior
+- You have a reproducible test case
+
+The bug report template will guide you to provide:
+- Soroban network context (devnet, testnet, or mainnet)
+- Contract ID and affected function
+- Steps to reproduce the issue
+- Expected vs. actual behavior
+- Test command output and environment details
+- Verification checklist to ensure completeness
+
+### Feature Requests
+
+Use the [feature request template](/.github/ISSUE_TEMPLATE/feature_request.md) when:
+- You want to propose a new capability
+- You want to suggest an enhancement
+- You have an idea for improving the project
+
+The feature request template will guide you to provide:
+- Clear feature description
+- Use case and motivation
+- Proposed solution and alternative approaches
+- Security and network-specific considerations
+- Architecture alignment
+- Related issues or pull requests
+
+### Security Issues
+
+**For security-related issues**, please follow the [Security Policy](SECURITY.md) and report via GitHub's security advisory system instead of creating a public issue. Do not disclose security vulnerabilities publicly.
+
+### Issue Labels
+
+We use the following labels to categorize issues:
+
+- `bug`: Something isn't working as expected
+- `enhancement`: New feature or request
+- `documentation`: Improvements or additions to documentation
+- `good first issue`: Good for newcomers
+- `security`: Security-related issues or improvements
+- `help wanted`: Extra attention needed
 
 ## Development Setup
 
@@ -55,17 +104,6 @@ For frontend or agent changes, run:
 ```bash
 npm test
 ```
-
-## Issue Labeling
-
-We use the following labels to categorize issues:
-
-- `bug`: Something isn't working as expected.
-- `enhancement`: New feature or request.
-- `documentation`: Improvements or additions to documentation.
-- `good first issue`: Good for newcomers.
-- `security`: Security-related issues or improvements.
-- `help wanted`: Extra attention needed.
 
 ## CI Requirements
 
