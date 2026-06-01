@@ -19,7 +19,7 @@ Growing DeFi ecosystem — Blend (lending), Templar (borrowing), RWA protocols
 
 
 Features
-FeatureDescription🤖 AI AgentAutonomous 24/7 yield optimization across Stellar DeFi💬 Natural LanguageChat to deposit, withdraw, and check balances📈 Auto-RebalancingAgent shifts funds to best opportunities automatically🔐 Non-CustodialYour funds live in audited Soroban smart contracts⚡ Instant WithdrawalsNo lock-ups, no penalties, withdraw anytime📱 WhatsApp ReadyFull functionality through WhatsApp chat interface🌍 Global AccessNo geographic restrictions, no bank account required🛡️ Security FirstSoroban contracts with ReentrancyGuard and access controls
+FeatureDescription🤖 AI AgentAutonomous 24/7 yield optimization across Stellar DeFi💬 Natural LanguageChat to deposit, withdraw, and check balances📈 Auto-RebalancingAgent shifts funds to best opportunities automatically🔐 Non-CustodialYour funds live in audited Soroban smart contracts⚡ Instant WithdrawalsNo lock-ups, no penalties, withdraw anytime📱 WhatsApp ReadyFull functionality through WhatsApp chat interface🌍 Global AccessNo geographic restrictions, no bank account required🛡️ Security FirstSoroban contracts protected by strict CEI ordering and access controls
 
 How It Works
 1. User deposits USDC via web app
@@ -46,7 +46,7 @@ Smart Contracts
 Language: Rust (Soroban SDK 21.0.0)
 Standard: ERC-4626 inspired vault architecture
 Network: Stellar Mainnet / Testnet
-Security: OpenZeppelin-equivalent patterns (ReentrancyGuard, Pausable, Access Control)
+Security: OpenZeppelin-equivalent patterns (Pausable, Access Control) and strict CEI pattern for reentrancy protection
 
 Backend / AI Agent
 
@@ -191,6 +191,7 @@ Emergency pause functionality available to contract owner
 Two-step ownership transfer prevents accidental ownership loss
 Vault balance verification ensures reported assets match actual holdings
 Read-only getters have no TTL side effects; call `touch_user_ttl` to extend user share entry TTL
+Strict Checks-Effects-Interactions (CEI) pattern prevents reentrancy without needing explicit locks (see [reentrancy protection tests](neurowealth-vault/contracts/vault/src/tests/test_legacy_inline.rs))
 
 Secure Deployment Sequence
 
