@@ -70,6 +70,7 @@
 //! - `Owner`: Contract owner address for administrative functions
 //! - `TvlCap`: Maximum total value locked in the vault
 //! - `UserDepositCap`: Maximum deposit per user
+//! - `BlendApprovalTtl`: Approval lifetime in ledgers for Blend supply approvals
 //! - `Version`: Contract version for upgrade tracking
 //! - `MinRebalanceInterval`: Minimum ledgers between rebalances (owner-configurable, Issue #59)
 //! - `LastRebalanceLedger`: Ledger number of the most recent successful rebalance call (Issue #59)
@@ -279,6 +280,8 @@ pub enum DataKey {
     /// Current protocol where funds are deployed
     /// Symbol indicating the active protocol (e.g., "blend", "none")
     CurrentProtocol,
+    /// Ledger TTL used when approving Blend token spend
+    BlendApprovalTtl,
     /// Deployer address - the address that deployed the contract
     /// Used for signature verification during initialization to prevent front-running
     Deployer,
@@ -645,6 +648,11 @@ const DEFAULT_MAX_DEPOSIT: i128 = 10_000_000_000_i128;
 const USER_SHARES_TTL_THRESHOLD: u32 = 100;
 /// Target ledgers to extend a user's `Shares` entry to when maintaining TTL.
 const USER_SHARES_TTL_EXTEND_TO: u32 = 100;
+/// Default ledgers kept alive for Blend token approvals.
+///
+/// The approval expiration ledger is calculated as:
+/// `current_ledger_sequence + BlendApprovalTtl`.
+const DEFAULT_BLEND_APPROVAL_TTL: u32 = 100_000;
 
 pub(crate) const TOPIC_INIT: Symbol = symbol_short!("init");
 pub(crate) const TOPIC_DEPOSIT: Symbol = symbol_short!("deposit");
@@ -903,6 +911,9 @@ impl NeuroWealthVault {
         env.storage()
             .instance()
             .set(&DataKey::MaxDeposit, &DEFAULT_MAX_DEPOSIT);
+        env.storage()
+            .instance()
+            .set(&DataKey::BlendApprovalTtl, &DEFAULT_BLEND_APPROVAL_TTL);
         env.storage().instance().set(&DataKey::Version, &1_u32);
 
         env.events().publish(
@@ -2321,6 +2332,21 @@ impl NeuroWealthVault {
         }
     }
 
+    /// Updates the ledger TTL used when approving Blend token spend.
+    ///
+    /// The approval expiration ledger is computed as:
+    /// `env.ledger().sequence() + blend_approval_ttl`
+    pub fn set_blend_approval_ttl(env: Env, owner: Address, blend_approval_ttl: u32) {
+        Self::require_initialized(&env);
+        owner.require_auth();
+        let stored_owner: Address = env.storage().instance().get(&DataKey::Owner).unwrap();
+        assert_eq!(owner, stored_owner, "vault: only owner can set blend approval ttl");
+
+        env.storage()
+            .instance()
+            .set(&DataKey::BlendApprovalTtl, &blend_approval_ttl);
+    }
+
     // ==========================================================================
     // ADMINISTRATIVE - OWNERSHIP TRANSFER
     // ==========================================================================
@@ -3322,6 +3348,15 @@ impl NeuroWealthVault {
         env.storage().instance().get(&DataKey::BlendPool)
     }
 
+    /// Returns the ledger TTL used when approving Blend token spend.
+    pub fn get_blend_approval_ttl(env: Env) -> u32 {
+        Self::require_initialized(&env);
+        env.storage()
+            .instance()
+            .get(&DataKey::BlendApprovalTtl)
+            .unwrap_or(DEFAULT_BLEND_APPROVAL_TTL)
+    }
+
     /// Returns the current exchange rate: assets per share, scaled by `EXCHANGE_RATE_SCALAR`.
     ///
     /// ## Formula
@@ -3736,6 +3771,7 @@ impl NeuroWealthVault {
     /// - Returns 0 if amount <= 0
     /// - Panics if Blend pool address is not configured
     /// - Emits BlendSupplyEvent with success status
+    /// - Uses `BlendApprovalTtl` from instance storage to set the approval expiry
     fn supply_to_blend(env: &Env, amount: i128, min_out: i128) -> i128 {
         if amount <= 0 {
             return 0;
@@ -3749,7 +3785,12 @@ impl NeuroWealthVault {
 
         let usdc_token: Address = env.storage().instance().get(&DataKey::UsdcToken).unwrap();
         let vault_address = env.current_contract_address();
-        let approval_ledger = env.ledger().sequence() + 100_000;
+        let approval_ttl = env
+            .storage()
+            .instance()
+            .get(&DataKey::BlendApprovalTtl)
+            .unwrap_or(DEFAULT_BLEND_APPROVAL_TTL);
+        let approval_ledger = env.ledger().sequence().saturating_add(approval_ttl);
 
         // Prepare authorization for token approval and Blend supply
         let approval_args: Vec<Val> = vec![
