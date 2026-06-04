@@ -1,0 +1,111 @@
+# deny.toml — cargo-deny configuration for NeuroWealth Vault
+# https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+# Analyse the full dependency tree, including dev-dependencies used in tests.
+all-features = false
+no-default-features = false
+
+# ── Advisories ────────────────────────────────────────────────────────────────
+[advisories]
+# Path to a local copy of the RustSec advisory database.
+# Leave unset to let cargo-deny fetch it automatically in CI.
+# db-path = "~/.cargo/advisory-db"
+
+# Which advisory sources to query.
+db-urls = ["https://github.com/rustsec/advisory-db"]
+
+# Fail the build for any vulnerability at or above this CVSS score.
+# "medium" == CVSS >= 4.0; use "high" (>= 7.0) for a less strict gate.
+vulnerability = "deny"
+
+# Unmaintained crates are warned about, not failed.
+unmaintained = "warn"
+
+# Crates that have been yanked from crates.io fail the build.
+yanked = "deny"
+
+# Notice-level advisories (informational) are only printed.
+notice = "warn"
+
+# ── Exceptions ────────────────────────────────────────────────────────────────
+# Add entries here when a published advisory cannot be resolved immediately.
+# Each exception MUST include:
+#   - id    : the RUSTSEC advisory ID
+#   - name  : the affected crate
+#   - reason: a short justification and a ticket/issue link
+#
+# Example (remove the leading '#' to activate):
+# [[advisories.ignore]]
+# id     = "RUSTSEC-2023-XXXX"
+# crate  = { name = "some-crate", version = "=1.2.3" }
+# reason = "Upstream fix not yet released; tracked in issue #42"
+#
+# PROCESS: To add an exception, open a PR that modifies this file with the
+# required fields above and a link to the tracking issue.  Exceptions are
+# reviewed and re-evaluated in every sprint.
+
+# ── Licenses ─────────────────────────────────────────────────────────────────
+[licenses]
+# Acceptable SPDX license identifiers.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "MIT-0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-DFS-2016",
+    "Zlib",
+    "CC0-1.0",
+    "MPL-2.0",          # Mozilla Public License — compatible with our use
+]
+
+# Deny these licenses outright (copyleft that would affect our distribution).
+deny = [
+    "GPL-1.0",
+    "GPL-2.0",
+    "GPL-3.0",
+    "LGPL-2.0",
+    "LGPL-2.1",
+    "LGPL-3.0",
+    "AGPL-1.0",
+    "AGPL-3.0",
+]
+
+# Warn (but don't fail) for ambiguous/unlicensed crates so we can triage.
+unlicensed = "deny"
+copyleft = "warn"
+allow-osi-fsf-free = "neither"
+default = "deny"
+confidence-threshold = 0.8
+
+# Per-crate license exceptions — add only after legal sign-off.
+# [[licenses.exceptions]]
+# allow  = ["LicenseRef-scancode-public-domain"]
+# name   = "ring"
+# version = "*"
+
+# ── Bans ─────────────────────────────────────────────────────────────────────
+[bans]
+# Deny multiple versions of the same crate (forces deduplication).
+multiple-versions = "warn"
+wildcards = "allow"
+highlight = "all"
+
+# Crates we never want in the tree.
+deny = [
+    # { name = "openssl", reason = "use rustls instead" },
+]
+
+# ── Sources ───────────────────────────────────────────────────────────────────
+[sources]
+# Only allow dependencies from crates.io and our own git repositories.
+unknown-registry = "deny"
+unknown-git = "deny"
+
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+
+# Whitelist internal/forked crates hosted on GitHub.
+# allow-git = ["https://github.com/your-org/forked-crate"]

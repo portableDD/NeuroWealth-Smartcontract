@@ -112,7 +112,7 @@ fn test_set_tvl_cap_requires_owner_auth() {
 /// Negative: a non-owner that *does* hold a valid signature for `pause` is still
 /// rejected by the identity check. Auth is scoped to the attacker only.
 #[test]
-#[should_panic(expected = "vault: only owner can pause")]
+#[should_panic(expected = "Error(Contract, #19)")]
 fn test_non_owner_with_own_auth_cannot_pause() {
     let env = Env::default();
     let (contract_id, _agent, _owner, _usdc_token) = setup(&env);
@@ -150,12 +150,12 @@ fn test_agent_rebalance_with_scoped_auth() {
         invoke: &MockAuthInvoke {
             contract: &contract_id,
             fn_name: "rebalance",
-            args: (symbol_short!("none"), 500_i128).into_val(&env),
+            args: (symbol_short!("none"), 500_i128, 0_i128).into_val(&env),
             sub_invokes: &[],
         },
     }]);
 
-    client.rebalance(&symbol_short!("none"), &500_i128);
+    client.rebalance(&symbol_short!("none"), &500_i128, &0_i128);
     assert_eq!(client.get_current_protocol(), symbol_short!("none"));
 }
 
@@ -168,7 +168,7 @@ fn test_rebalance_requires_agent_auth() {
 
     env.mock_auths(&[]);
 
-    let result = client.try_rebalance(&symbol_short!("none"), &500_i128);
+    let result = client.try_rebalance(&symbol_short!("none"), &500_i128, &0_i128);
     assert!(
         result.is_err(),
         "rebalance must fail without the agent's authorization"
@@ -331,4 +331,42 @@ fn test_withdraw_requires_user_auth() {
         result.is_err(),
         "withdraw must fail without the user's authorization"
     );
+}
+
+// ============================================================================
+// LOSS REPORTING — OWNER CO-SIGN REQUIREMENT
+// ============================================================================
+
+/// Negative: with only the agent's auth present, a decrease must fail because
+/// `require_is_owner` cannot be satisfied. Guards against a removed auth check.
+#[test]
+fn test_decrease_requires_owner_cosign() {
+    let env = Env::default();
+    let (contract_id, agent, _owner, usdc_token) = setup(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let user = Address::generate(&env);
+    let deposit_amount = 10_000_000_i128;
+    mint_and_deposit(&env, &client, &usdc_token, &user, deposit_amount);
+
+    let new_total = deposit_amount - 500_000_i128; // 5% loss, within 10% cap
+
+    // Only the agent's auth is available — the owner has NOT signed.
+    env.mock_auths(&[MockAuth {
+        address: &agent,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "update_total_assets",
+            args: (agent.clone(), new_total, true, 1000u32).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+
+    let result = client.try_update_total_assets(&agent, &new_total, &true, &1000u32);
+    assert!(
+        result.is_err(),
+        "decrease must fail when owner has not co-signed"
+    );
+    // Total assets must be unchanged.
+    assert_eq!(client.get_total_assets(), deposit_amount);
 }

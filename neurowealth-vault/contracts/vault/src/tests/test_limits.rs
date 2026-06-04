@@ -50,7 +50,7 @@ fn test_set_caps() {
 }
 
 #[test]
-#[should_panic(expected = "vault: user deposit cap cannot be negative")]
+#[should_panic(expected = "Error(Contract, #24)")]
 fn test_set_caps_negative_user_cap() {
     let env = Env::default();
     env.mock_all_auths();
@@ -62,7 +62,7 @@ fn test_set_caps_negative_user_cap() {
 }
 
 #[test]
-#[should_panic(expected = "vault: tvl cap cannot be negative")]
+#[should_panic(expected = "Error(Contract, #23)")]
 fn test_set_caps_negative_tvl_cap() {
     let env = Env::default();
     env.mock_all_auths();
@@ -74,7 +74,7 @@ fn test_set_caps_negative_tvl_cap() {
 }
 
 #[test]
-#[should_panic(expected = "vault: tvl cap must be >= user deposit cap")]
+#[should_panic(expected = "Error(Contract, #25)")]
 fn test_set_caps_tvl_cap_less_than_user_cap() {
     let env = Env::default();
     env.mock_all_auths();
@@ -104,7 +104,7 @@ fn test_set_deposit_limits() {
 }
 
 #[test]
-#[should_panic(expected = "vault: minimum deposit too low")]
+#[should_panic(expected = "Error(Contract, #26)")]
 fn test_set_deposit_limits_min_too_low() {
     let env = Env::default();
     env.mock_all_auths();
@@ -119,7 +119,7 @@ fn test_set_deposit_limits_min_too_low() {
 }
 
 #[test]
-#[should_panic(expected = "vault: maximum deposit below minimum")]
+#[should_panic(expected = "Error(Contract, #27)")]
 fn test_set_deposit_limits_max_less_than_min() {
     let env = Env::default();
     env.mock_all_auths();
@@ -134,7 +134,7 @@ fn test_set_deposit_limits_max_less_than_min() {
 }
 
 #[test]
-#[should_panic(expected = "vault: exceeds TVL cap")]
+#[should_panic(expected = "Error(Contract, #41)")]
 fn test_deposit_enforces_tvl_cap() {
     let env = Env::default();
     env.mock_all_auths();
@@ -155,7 +155,7 @@ fn test_deposit_enforces_tvl_cap() {
 }
 
 #[test]
-#[should_panic(expected = "vault: exceeds user deposit cap")]
+#[should_panic(expected = "Error(Contract, #40)")]
 fn test_deposit_enforces_user_cap() {
     let env = Env::default();
     env.mock_all_auths();
@@ -227,7 +227,7 @@ fn test_get_min_deposit_uses_default_when_key_missing() {
 }
 
 #[test]
-#[should_panic(expected = "vault: below minimum deposit")]
+#[should_panic(expected = "Error(Contract, #38)")]
 fn test_deposit_uses_default_minimum_when_key_missing() {
     let env = Env::default();
     env.mock_all_auths();
@@ -245,4 +245,208 @@ fn test_deposit_uses_default_minimum_when_key_missing() {
     token_client.mint(&user, &below_default_min);
 
     client.deposit(&user, &below_default_min);
+}
+
+// ============================================================================
+// ISSUE #119 — REJECT NEGATIVE VALUES IN TVL AND PER-USER CAP SETTERS
+// ============================================================================
+
+// ---- set_tvl_cap ------------------------------------------------------------
+
+#[test]
+#[should_panic(expected = "Error(Contract, #23)")]
+fn test_set_tvl_cap_rejects_negative() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    client.set_tvl_cap(&-1_i128);
+}
+
+/// Zero is a valid TVL cap meaning "no cap enforced".
+#[test]
+fn test_set_tvl_cap_accepts_zero() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    client.set_tvl_cap(&0_i128);
+    assert_eq!(client.get_tvl_cap(), 0);
+}
+
+// ---- set_user_deposit_cap ---------------------------------------------------
+
+#[test]
+#[should_panic(expected = "Error(Contract, #24)")]
+fn test_set_user_deposit_cap_rejects_negative() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    client.set_user_deposit_cap(&-1_i128);
+}
+
+/// Zero is a valid per-user cap meaning "no cap enforced".
+#[test]
+fn test_set_user_deposit_cap_accepts_zero() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    client.set_user_deposit_cap(&0_i128);
+    assert_eq!(client.get_user_deposit_cap(), 0);
+}
+
+// ---- set_limits (deprecated) ------------------------------------------------
+
+#[test]
+#[should_panic(expected = "Error(Contract, #1)")]
+fn test_set_limits_rejects_negative_min() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    #[allow(deprecated)]
+    client.set_limits(&-1_i128, &100_000_000_i128);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #2)")]
+fn test_set_limits_rejects_negative_max() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    #[allow(deprecated)]
+    client.set_limits(&0_i128, &-1_i128);
+}
+
+/// Zero values for both caps are valid (means unlimited for each).
+#[test]
+fn test_set_limits_accepts_zero_values() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    #[allow(deprecated)]
+    client.set_limits(&0_i128, &0_i128);
+
+    assert_eq!(client.get_user_deposit_cap(), 0);
+    assert_eq!(client.get_tvl_cap(), 0);
+}
+
+// ============================================================================
+// DEPOSIT CAP — ASSETS-BASED SEMANTICS (includes accrued yield)
+// ============================================================================
+
+/// After yield pushes the user's asset value to the cap, any further deposit
+/// must be rejected even though the user's principal is still below the cap.
+#[test]
+#[should_panic(expected = "Error(Contract, #40)")]
+fn test_deposit_cap_blocks_deposit_when_yield_fills_cap() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, agent, _owner, usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+    let token_client = TestTokenClient::new(&env, &usdc_token);
+
+    // Cap = 10 USDC; user deposits 8 USDC (2 USDC headroom by principal).
+    let cap = 10_000_000_i128;
+    let deposit = 8_000_000_i128;
+    client.set_user_deposit_cap(&cap);
+
+    let user = Address::generate(&env);
+    mint_and_deposit(&env, &client, &usdc_token, &user, deposit);
+
+    // Accrue 2 USDC yield — user's asset value is now exactly 10 USDC (= cap).
+    let yield_amount = 2_000_000_i128;
+    token_client.mint(&contract_id, &yield_amount);
+    client.update_total_assets(&agent, &(deposit + yield_amount), &false, &0);
+
+    assert_eq!(client.get_balance(&user), cap);
+
+    // Any further deposit must be rejected (assets + amount > cap).
+    let extra = 1_000_000_i128;
+    token_client.mint(&user, &extra);
+    client.deposit(&user, &extra);
+}
+
+/// Yield accrual alone (without a deposit) does not block a user whose asset
+/// value still has room under the cap.
+#[test]
+fn test_deposit_cap_allows_deposit_when_assets_still_under_cap_after_yield() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, agent, _owner, usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+    let token_client = TestTokenClient::new(&env, &usdc_token);
+
+    // Cap = 12 USDC; user deposits 8 USDC.
+    let cap = 12_000_000_i128;
+    let deposit = 8_000_000_i128;
+    client.set_user_deposit_cap(&cap);
+
+    let user = Address::generate(&env);
+    mint_and_deposit(&env, &client, &usdc_token, &user, deposit);
+
+    // Accrue 2 USDC yield — user's asset value is now 10 USDC (2 USDC headroom).
+    let yield_amount = 2_000_000_i128;
+    token_client.mint(&contract_id, &yield_amount);
+    client.update_total_assets(&agent, &(deposit + yield_amount), &false, &0);
+
+    assert_eq!(client.get_balance(&user), deposit + yield_amount);
+
+    // A 2 USDC deposit fits exactly: assets(10) + amount(2) = cap(12).
+    let top_up = 2_000_000_i128;
+    token_client.mint(&user, &top_up);
+    client.deposit(&user, &top_up);
+
+    assert!(client.get_balance(&user) >= cap - 1_000_i128);
+}
+
+/// Yield that only partially closes the gap still blocks a deposit that would
+/// push total asset value over the cap.
+#[test]
+#[should_panic(expected = "Error(Contract, #40)")]
+fn test_deposit_cap_blocks_when_yield_partially_fills_cap() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, agent, _owner, usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+    let token_client = TestTokenClient::new(&env, &usdc_token);
+
+    // Cap = 10 USDC; user deposits 8 USDC.
+    let cap = 10_000_000_i128;
+    let deposit = 8_000_000_i128;
+    client.set_user_deposit_cap(&cap);
+
+    let user = Address::generate(&env);
+    mint_and_deposit(&env, &client, &usdc_token, &user, deposit);
+
+    // Accrue 1 USDC yield — user's asset value is now 9 USDC (1 USDC headroom).
+    let yield_amount = 1_000_000_i128;
+    token_client.mint(&contract_id, &yield_amount);
+    client.update_total_assets(&agent, &(deposit + yield_amount), &false, &0);
+
+    // Attempting to deposit 2 USDC would put assets at 11 > cap(10) — must fail.
+    let over_limit = 2_000_000_i128;
+    token_client.mint(&user, &over_limit);
+    client.deposit(&user, &over_limit);
 }

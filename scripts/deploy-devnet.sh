@@ -89,12 +89,24 @@ EXAMPLE:
 EOF
 }
 
-# Check if stellar CLI is installed
+# Check if stellar CLI is installed and matches the pinned version
 check_stellar_cli() {
+  local pinned_version
+  pinned_version=$(cat "$REPO_ROOT/.stellar-version" | tr -d '[:space:]')
+
   if ! command -v stellar &> /dev/null; then
-    log "ERROR: stellar CLI not found. Please install it first:"
-    log "  cargo install --locked stellar-cli --features opt"
+    log "ERROR: stellar CLI not found. Please install version $pinned_version:"
+    log "  cargo install --locked stellar-cli --version $pinned_version --features opt"
     exit 1
+  fi
+
+  local installed_version
+  installed_version=$(stellar --version 2>/dev/null | awk '{print $2}')
+  if [[ "$installed_version" != "$pinned_version" ]]; then
+    log "WARNING: Stellar CLI version drift detected!"
+    log "  Installed: $installed_version"
+    log "  Pinned:    $pinned_version"
+    log "Please install the pinned version to avoid build/deployment breakage."
   fi
 }
 
@@ -252,6 +264,9 @@ show_summary() {
   echo ""
   echo "  3. Deposit USDC:"
   echo "     stellar contract invoke --id \$VAULT_CONTRACT_ID --source \$AGENT_SECRET_KEY --network \$SOROBAN_NETWORK_PASSPHRASE --rpc-url \$SOROBAN_RPC_URL -- deposit --user \$AGENT_ADDRESS --amount 10000000"
+  echo ""
+  echo "  4. Verify deployment:"
+  echo "     ./scripts/verify-deployment.sh"
   echo ""
   echo "Documentation: EVENTS.md"
   echo "Repository: https://github.com/xeladev/neurowealth-smartcontract"

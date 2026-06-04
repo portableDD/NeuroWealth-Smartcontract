@@ -10,11 +10,12 @@ use super::utils::*;
 use crate::{
     AgentUpdatedEvent, AssetsUpdatedEvent, BlendSupplyEvent, BlendWithdrawEvent, DepositEvent,
     EmergencyPausedEvent, LimitsUpdatedEvent, OwnershipTransferInitiatedEvent,
-    OwnershipTransferredEvent, RebalanceEvent, VaultInitializedEvent, VaultPausedEvent,
-    VaultUnpausedEvent, WithdrawEvent, TOPIC_AGENT_UPDATED, TOPIC_ASSETS_UPDATED,
-    TOPIC_BLEND_SUPPLY, TOPIC_BLEND_WITHDRAW, TOPIC_DEPOSIT, TOPIC_EMERGENCY_PAUSED, TOPIC_INIT,
-    TOPIC_LIMITS_UPDATED, TOPIC_OWNERSHIP_INITIATED, TOPIC_OWNERSHIP_TRANSFERRED, TOPIC_PAUSED,
-    TOPIC_REBALANCE, TOPIC_UNPAUSED, TOPIC_WITHDRAW,
+    OwnershipTransferredEvent, ProtocolChangedEvent, RebalanceEvent, TvlCapUpdatedEvent,
+    UserDepositCapUpdatedEvent, VaultInitializedEvent, VaultPausedEvent, VaultUnpausedEvent,
+    WithdrawEvent, TOPIC_AGENT_UPDATED, TOPIC_ASSETS_UPDATED, TOPIC_BLEND_SUPPLY,
+    TOPIC_BLEND_WITHDRAW, TOPIC_DEPOSIT, TOPIC_EMERGENCY_PAUSED, TOPIC_INIT, TOPIC_LIMITS_UPDATED,
+    TOPIC_OWNERSHIP_INITIATED, TOPIC_OWNERSHIP_TRANSFERRED, TOPIC_PAUSED, TOPIC_PROTOCOL_CHANGED,
+    TOPIC_REBALANCE, TOPIC_TVL_CAP_UPDATED, TOPIC_UNPAUSED, TOPIC_USER_CAP_UPDATED, TOPIC_WITHDRAW,
 };
 use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env, TryFromVal};
 
@@ -144,6 +145,38 @@ fn test_event_schema_administrative_events() {
     assert_eq!(limits_event.new_min, new_min);
     assert_eq!(limits_event.old_max, 10_000_000_000_i128); // Default maximum
     assert_eq!(limits_event.new_max, new_max);
+
+    // Test TVL cap update event
+    let new_tvl_cap = 500_000_000_000_i128;
+    client.set_tvl_cap(&new_tvl_cap);
+
+    let tvl_events = find_events_by_topic(env.events().all(), &env, TOPIC_TVL_CAP_UPDATED);
+    assert_eq!(
+        tvl_events.len(),
+        1,
+        "Exactly one TVL cap update event should be emitted"
+    );
+
+    let (_, _, data) = &tvl_events[0];
+    let tvl_event =
+        TvlCapUpdatedEvent::try_from_val(&env, data).expect("Should be a valid TvlCapUpdatedEvent");
+    assert_eq!(tvl_event.new_cap, new_tvl_cap);
+
+    // Test User cap update event
+    let new_user_cap = 50_000_000_000_i128;
+    client.set_user_deposit_cap(&new_user_cap);
+
+    let user_cap_events = find_events_by_topic(env.events().all(), &env, TOPIC_USER_CAP_UPDATED);
+    assert_eq!(
+        user_cap_events.len(),
+        1,
+        "Exactly one User cap update event should be emitted"
+    );
+
+    let (_, _, data) = &user_cap_events[0];
+    let user_cap_event = UserDepositCapUpdatedEvent::try_from_val(&env, data)
+        .expect("Should be a valid UserDepositCapUpdatedEvent");
+    assert_eq!(user_cap_event.new_cap, new_user_cap);
 }
 
 /// Test that rebalance events have correct topics and payload structure
@@ -158,7 +191,7 @@ fn test_event_schema_rebalance_events() {
     // Test rebalance event
     let protocol = symbol_short!("none");
     let expected_apy = 850_i128;
-    client.rebalance(&protocol, &expected_apy);
+    client.rebalance(&protocol, &expected_apy, &0_i128);
 
     let rebalance_events = find_events_by_topic(env.events().all(), &env, TOPIC_REBALANCE);
     assert_eq!(
@@ -174,9 +207,57 @@ fn test_event_schema_rebalance_events() {
     // Verify payload structure
     assert_eq!(rebalance_event.protocol, protocol);
     assert_eq!(rebalance_event.expected_apy, expected_apy);
-    assert_eq!(rebalance_event.status, symbol_short!("success"));
+    assert_eq!(rebalance_event.status, symbol_short!("noop"));
     assert_eq!(rebalance_event.amount_attempted, 0);
     assert_eq!(rebalance_event.amount_moved, 0);
+    assert_eq!(rebalance_event.amount_supplied, 0);
+    assert_eq!(rebalance_event.amount_withdrawn, 0);
+}
+
+/// ProtocolChangedEvent is emitted when CurrentProtocol updates (#149).
+#[test]
+fn test_event_schema_protocol_changed_events() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, owner, usdc_token, blend_pool) =
+        setup_vault_with_token_and_blend(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    client.set_blend_pool(&owner, &blend_pool);
+
+    let user = Address::generate(&env);
+    mint_and_deposit(&env, &client, &usdc_token, &user, 10_000_000_i128);
+
+    client.rebalance(&symbol_short!("blend"), &1200_i128, &0_i128);
+
+    let proto_events = find_events_by_topic(env.events().all(), &env, TOPIC_PROTOCOL_CHANGED);
+    assert_eq!(
+        proto_events.len(),
+        1,
+        "Exactly one protocol changed event should be emitted"
+    );
+
+    let (_, _, data) = &proto_events[0];
+    let proto_event = ProtocolChangedEvent::try_from_val(&env, data)
+        .expect("Should be a valid ProtocolChangedEvent");
+    assert_eq!(proto_event.old_protocol, symbol_short!("none"));
+    assert_eq!(proto_event.new_protocol, symbol_short!("blend"));
+
+    client.rebalance(&symbol_short!("none"), &500_i128, &0_i128);
+
+    let proto_events = find_events_by_topic(env.events().all(), &env, TOPIC_PROTOCOL_CHANGED);
+    assert_eq!(
+        proto_events.len(),
+        2,
+        "Second transition should emit another protocol changed event"
+    );
+
+    let (_, _, data) = &proto_events[1];
+    let proto_event = ProtocolChangedEvent::try_from_val(&env, data)
+        .expect("Should be a valid ProtocolChangedEvent");
+    assert_eq!(proto_event.old_protocol, symbol_short!("blend"));
+    assert_eq!(proto_event.new_protocol, symbol_short!("none"));
 }
 
 /// Test that ownership transfer events have correct topics and payload structure
@@ -300,7 +381,7 @@ fn test_event_schema_emergency_events() {
 
     // Test emergency pause event
     client.emergency_pause(&owner);
-    let emerg_events = find_events_by_topic(env.events().all(), &env, TOPIC_EMERGENCY_PAUSED);
+    let emerg_events = find_events_by_topic(env.events().all(), &env, symbol_short!("emerg"));
     assert_eq!(
         emerg_events.len(),
         1,
@@ -331,7 +412,7 @@ fn test_event_schema_blend_events() {
     mint_and_deposit(&env, &client, &usdc_token, &user, 10_000_000_i128);
 
     // Test rebalance to blend (should emit BlendSupplyEvent)
-    client.rebalance(&symbol_short!("blend"), &1200_i128);
+    client.rebalance(&symbol_short!("blend"), &1200_i128, &0_i128);
 
     let supply_events = find_events_by_topic(env.events().all(), &env, TOPIC_BLEND_SUPPLY);
     assert_eq!(
@@ -346,11 +427,11 @@ fn test_event_schema_blend_events() {
 
     // Verify payload structure
     assert_eq!(supply_event.asset, usdc_token);
-    assert_eq!(supply_event.amount, 10_000_000_i128);
+    assert_eq!(supply_event.amount_actual, 10_000_000_i128);
     assert!(supply_event.success);
 
     // Test rebalance back to none (should emit BlendWithdrawEvent)
-    client.rebalance(&symbol_short!("none"), &500_i128);
+    client.rebalance(&symbol_short!("none"), &500_i128, &0_i128);
 
     let withdraw_events = find_events_by_topic(env.events().all(), &env, TOPIC_BLEND_WITHDRAW);
     assert_eq!(
@@ -365,8 +446,7 @@ fn test_event_schema_blend_events() {
 
     // Verify payload structure
     assert_eq!(withdraw_event.asset, usdc_token);
-    assert_eq!(withdraw_event.requested_amount, 10_000_000_i128);
-    assert_eq!(withdraw_event.amount_received, 10_000_000_i128);
+    assert_eq!(withdraw_event.amount_actual, 10_000_000_i128);
     assert!(withdraw_event.success);
 }
 
@@ -394,6 +474,8 @@ fn test_all_event_topics_schema_compliance() {
     client.unpause(&owner);
     client.emergency_pause(&owner);
     client.set_deposit_limits(&2_000_000_i128, &20_000_000_000_i128);
+    client.set_tvl_cap(&500_000_000_000_i128);
+    client.set_user_deposit_cap(&50_000_000_000_i128);
 
     // Agent and assets events
     client.update_agent(&new_agent);
@@ -418,8 +500,10 @@ fn test_all_event_topics_schema_compliance() {
         ("withdraw", "User withdrawal"),
         ("paused", "Vault paused"),
         ("unpaused", "Vault unpaused"),
-        ("emergency", "Emergency pause"),
-        ("limits", "Limits updated"),
+        ("emerg", "Emergency pause"),
+        ("l_upd", "Limits updated"),
+        ("tvl_cap", "TVL cap updated"),
+        ("user_cap", "User cap updated"),
         ("agent", "Agent updated"),
         ("own_init", "Ownership transfer initiated"),
         ("own_xfer", "Ownership transferred"),
@@ -484,6 +568,24 @@ fn test_all_event_topics_schema_compliance() {
             }
             "limits" => {
                 let events = find_events_by_topic(env.events().all(), &env, TOPIC_LIMITS_UPDATED);
+                assert!(
+                    !events.is_empty(),
+                    "Expected event topic '{}' for {} not found",
+                    topic_symbol,
+                    description
+                );
+            }
+            "tvl_cap" => {
+                let events = find_events_by_topic(env.events().all(), &env, TOPIC_TVL_CAP_UPDATED);
+                assert!(
+                    !events.is_empty(),
+                    "Expected event topic '{}' for {} not found",
+                    topic_symbol,
+                    description
+                );
+            }
+            "user_cap" => {
+                let events = find_events_by_topic(env.events().all(), &env, TOPIC_USER_CAP_UPDATED);
                 assert!(
                     !events.is_empty(),
                     "Expected event topic '{}' for {} not found",
@@ -563,6 +665,58 @@ fn test_event_payload_field_types() {
     let _user_addr: Address = event.user;
     let _amount_val: i128 = event.amount;
     let _shares_val: i128 = event.shares;
+}
+
+/// Test that Deposit and Withdraw events carry the user address as an indexed topic.
+///
+/// Indexers and AI agents can efficiently filter events by user without scanning
+/// full payloads by using the second topic (user address) directly.
+#[test]
+fn test_deposit_withdraw_user_indexed_topic() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let user = Address::generate(&env);
+    let deposit_amount = 5_000_000_i128;
+    mint_and_deposit(&env, &client, &usdc_token, &user, deposit_amount);
+
+    let deposit_events = find_events_by_topic(env.events().all(), &env, TOPIC_DEPOSIT);
+    assert_eq!(deposit_events.len(), 1, "One deposit event expected");
+
+    let (_, topics, _) = &deposit_events[0];
+    let user_in_deposit_topics = (0..topics.len()).any(|j| {
+        topics
+            .get(j)
+            .and_then(|t| Address::try_from_val(&env, &t).ok())
+            .map(|a| a == user)
+            .unwrap_or(false)
+    });
+    assert!(
+        user_in_deposit_topics,
+        "DepositEvent must carry user address as an indexed topic"
+    );
+
+    let withdraw_amount = 2_000_000_i128;
+    client.withdraw(&user, &withdraw_amount);
+
+    let withdraw_events = find_events_by_topic(env.events().all(), &env, TOPIC_WITHDRAW);
+    assert_eq!(withdraw_events.len(), 1, "One withdraw event expected");
+
+    let (_, topics, _) = &withdraw_events[0];
+    let user_in_withdraw_topics = (0..topics.len()).any(|j| {
+        topics
+            .get(j)
+            .and_then(|t| Address::try_from_val(&env, &t).ok())
+            .map(|a| a == user)
+            .unwrap_or(false)
+    });
+    assert!(
+        user_in_withdraw_topics,
+        "WithdrawEvent must carry user address as an indexed topic"
+    );
 }
 
 /// Test event emission consistency across multiple operations

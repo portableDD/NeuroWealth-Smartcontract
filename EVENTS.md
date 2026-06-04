@@ -40,9 +40,12 @@ pub struct VaultInitializedEvent {
 - Indexers record vault deployment details
 
 ### 2. DepositEvent
-**Topic:** `"deposit"`
+**Topics:** `("deposit", <user: Address>)`
 
 Emitted when a user deposits USDC into the vault.
+
+The user address is published as a second **indexed topic** so that indexers
+and AI agents can filter deposit events by user without scanning full payloads.
 
 ```rust
 pub struct DepositEvent {
@@ -52,15 +55,24 @@ pub struct DepositEvent {
 }
 ```
 
+**Topic tuple (position → value):**
+| Position | Type    | Value                  |
+|----------|---------|------------------------|
+| 0        | Symbol  | `"deposit"`            |
+| 1        | Address | depositing user address |
+
 **Usage:**
 - AI agents detect new deposits to deploy yield strategies
 - Frontend updates user balances in real-time
-- Indexers track deposit history for analytics
+- Indexers filter deposit history by user via topic[1]
 
 ### 3. WithdrawEvent
-**Topic:** `"withdraw"`
+**Topics:** `("withdraw", <user: Address>)`
 
-Emitted when a user withdraws USDC from the vault.
+Emitted when a user withdraws USDC from the vault (both `withdraw` and `withdraw_all`).
+
+The user address is published as a second **indexed topic** so that indexers
+and AI agents can filter withdrawal events by user without scanning full payloads.
 
 ```rust
 pub struct WithdrawEvent {
@@ -70,10 +82,16 @@ pub struct WithdrawEvent {
 }
 ```
 
+**Topic tuple (position → value):**
+| Position | Type    | Value                   |
+|----------|---------|-------------------------|
+| 0        | Symbol  | `"withdraw"`            |
+| 1        | Address | withdrawing user address |
+
 **Usage:**
 - AI agents update internal records after withdrawals
 - Frontend updates user balances
-- Indexers track withdrawal history
+- Indexers filter withdrawal history by user via topic[1]
 
 ### 4. RebalanceEvent
 **Topic:** `"rebalance"`
@@ -82,15 +100,41 @@ Emitted when the AI agent rebalances funds between yield strategies.
 
 ```rust
 pub struct RebalanceEvent {
-    pub protocol: Symbol,     // Target protocol ("blend", "none")
-    pub expected_apy: i128,   // Expected APY in basis points (850 = 8.5%)
+    pub protocol: Symbol,         // Target protocol ("blend", "none")
+    pub expected_apy: i128,       // Expected APY in basis points (850 = 8.5%)
+    pub status: Symbol,           // "success", "failed", "partial", or "noop"
+    pub amount_attempted: i128,   // Amount attempted to be moved
+    pub amount_moved: i128,       // Amount actually moved
+    pub amount_supplied: i128,    // Amount supplied into the target protocol
+    pub amount_withdrawn: i128,   // Amount withdrawn from the prior protocol
 }
 ```
+
+**Agent / indexer notes:**
+- `"noop"`: target allocation already satisfied; no supply/withdraw leg ran (e.g. rebalance to Blend with zero idle USDC while already deployed).
+- `amount_supplied` captures the deployment size when moving into Blend.
+- `amount_withdrawn` captures the exit size when leaving Blend.
+- Prefer `ProtocolChangedEvent` for authoritative protocol transitions (see below).
 
 **Usage:**
 - AI agents track rebalancing decisions
 - Frontend displays current strategy allocation
 - Indexers monitor strategy changes for risk analysis
+
+### 4a. ProtocolChangedEvent
+**Topic:** `"proto_chg"`
+
+Emitted when `CurrentProtocol` storage changes (supply to Blend, full withdraw, or explicit transition to `"none"`).
+
+```rust
+pub struct ProtocolChangedEvent {
+    pub old_protocol: Symbol,
+    pub new_protocol: Symbol,
+}
+```
+
+**Usage:**
+- Indexers record explicit protocol state transitions without inferring from rebalance events alone
 
 ## Administrative Events
 
@@ -130,24 +174,47 @@ pub struct EmergencyPausedEvent {
 ### 8. LimitsUpdatedEvent
 **Topic:** `"limits"`
 
-Emitted when deposit limits or caps are updated.
+Emitted when per-transaction deposit limits are updated.
 
-> [!NOTE]
-> This canonical topic is used by:
-> - `set_deposit_limits`: Updates min/max per-transaction deposit limits (`min` = minimum deposit, `max` = maximum deposit).
-> - `set_limits` (Deprecated): Updates user and TVL caps (`min` = user deposit cap, `max` = TVL cap). Use `set_caps` instead.
+> [!IMPORTANT]
+> **Indexer Migration Note:**
+> Previously, `LimitsUpdatedEvent` was also used for TVL and User caps (via the deprecated `set_limits` function). This usage is now discouraged. Indexers should transition to monitoring `TvlCapUpdatedEvent` (`"tvl_cap"`), `UserDepositCapUpdatedEvent` (`"user_cap"`), and `CapsUpdatedEvent` (`"caps_upd"`) for all cap-related updates. The field names `min`/`max` in `LimitsUpdatedEvent` should only be interpreted as per-transaction deposit limits moving forward.
 
 ```rust
 pub struct LimitsUpdatedEvent {
-    pub old_min: i128,    // Previous minimum deposit limit or user cap
-    pub new_min: i128,    // New minimum deposit limit or user cap
-    pub old_max: i128,    // Previous maximum deposit limit or TVL cap
-    pub new_max: i128,    // New maximum deposit limit or TVL cap
+    pub old_min: i128,    // Previous minimum deposit limit
+    pub new_min: i128,    // New minimum deposit limit
+    pub old_max: i128,    // Previous maximum deposit limit
+    pub new_max: i128,    // New maximum deposit limit
 }
 ```
 
-### 8b. CapsUpdatedEvent
-**Topic:** `"caps"`
+### 8a. TvlCapUpdatedEvent
+**Topic:** `"tvl_cap"`
+
+Emitted when the vault's total TVL cap is updated.
+
+```rust
+pub struct TvlCapUpdatedEvent {
+    pub old_cap: i128,    // Previous TVL cap
+    pub new_cap: i128,    // New TVL cap
+}
+```
+
+### 8b. UserDepositCapUpdatedEvent
+**Topic:** `"user_cap"`
+
+Emitted when the per-user deposit cap is updated.
+
+```rust
+pub struct UserDepositCapUpdatedEvent {
+    pub old_cap: i128,    // Previous per-user cap
+    pub new_cap: i128,    // New per-user cap
+}
+```
+
+### 8c. CapsUpdatedEvent
+**Topic:** `"caps_upd"`
 
 Emitted when user deposit and TVL caps are updated in a single transaction via `set_caps`.
 

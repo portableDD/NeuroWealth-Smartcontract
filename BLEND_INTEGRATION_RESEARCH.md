@@ -4,183 +4,104 @@
 
 This document contains research findings for integrating the NeuroWealth Vault with Blend Protocol's Soroban pool contract for on-chain yield generation.
 
-## Research Sources
+## Production Soroban Interface (Blend v2)
 
-### Primary Resources
+The vault integrates via **request-based** fund management (not legacy `deposit`/`redeem` names):
 
-1. **Blend Contracts Repository**: `blend-capital/blend-contracts-v2`
-   - Contains the Soroban implementation of Blend Protocol v2
-   - Location: https://github.com/blend-capital/blend-contracts-v2
+| Entrypoint | Purpose |
+|------------|---------|
+| `submit_with_allowance(from, spender, to, requests)` | Supply assets (request type `0`) after USDC `approve` |
+| `submit(from, to, requests)` | Withdraw assets (request type `1`) |
+| `balance(asset, user)` | Supplied balance for the vault position |
 
-2. **Blend Integration Documentation**: 
-   - Official integration guide: https://docs.blend.capital/tech-docs/integrations/integrate-pool
-   - Covers pool selection, configuration, and integration patterns
+Request struct (contract-local mirror):
 
-3. **Blend Lending Pool Documentation**:
-   - Core contract interface: https://docs.blend.capital/tech-docs/core-contracts/lending-pool
-   - Function signatures and usage patterns
-
-4. **Blend Utils Repository**: `blend-capital/blend-utils`
-   - Deployment and utility scripts
-   - Testnet deployment addresses
-
-## Key Functions Identified
-
-Based on typical lending pool patterns and Blend documentation, the following functions are expected:
-
-### Supply Function
 ```rust
-pub fn supply(
-    env: Env,
-    asset: Address,
+struct BlendRequest {
+    request_type: u32,  // 0 = supply, 1 = withdraw
+    address: Address,   // USDC token
     amount: i128,
-    to: Address
-) -> i128
+}
 ```
-- Supplies assets to the Blend pool
-- Returns the amount of pool tokens received
-- `to` parameter specifies who receives the pool tokens (vault address)
 
-### Withdraw Function
-```rust
-pub fn withdraw(
-    env: Env,
-    asset: Address,
-    amount: i128,
-    to: Address
-) -> i128
-```
-- Withdraws assets from the Blend pool
-- Returns the amount of assets actually withdrawn
-- `to` parameter specifies where withdrawn assets are sent (vault address)
+Implementation: `BlendPoolClient` in `neurowealth-vault/contracts/vault/src/lib.rs`.
 
-### Get Reserve Data Function
-```rust
-pub fn get_reserve_data(
-    env: Env,
-    asset: Address
-) -> ReserveData
-```
-- Returns reserve data including:
-  - Current balance
-  - Interest rate
-  - Liquidity index
-  - Other reserve metrics
+References:
 
-### Get User Balance Function
-```rust
-pub fn get_user_account_data(
-    env: Env,
-    user: Address,
-    asset: Address
-) -> i128
-```
-- Returns the user's supplied balance for a specific asset
-- Alternative function names may be used (e.g., `get_balance`, `get_supply_balance`)
+- https://docs.blend.capital/tech-docs/core-contracts/lending-pool/fund-management
+- https://github.com/blend-capital/blend-contracts-v2
 
-## Implementation Notes
-
-### Cross-Contract Call Pattern
-
-The implementation uses Soroban's `env.invoke_contract()` method for cross-contract calls:
+## Cross-Contract Call Pattern
 
 ```rust
-env.invoke_contract::<ReturnType>(
+env.invoke_contract::<Val>(
     &pool_address,
-    &function_name,
-    &arguments_vec
-)
+    &Symbol::new(env, "submit_with_allowance"),
+    args,
+);
 ```
 
-### Token Approval Pattern
+Supply flow:
 
-Before supplying to Blend, the vault must:
-1. Approve the Blend pool to spend USDC from the vault
-2. Call Blend's `supply()` function
-3. Blend handles the token transfer internally via the approval
+1. Vault `approve`s the Blend pool for the supply amount.
+2. Vault calls `submit_with_allowance` with a type-0 request.
+3. Blend pulls USDC via `transfer_from` (authorized sub-invocation).
 
-### Error Handling Strategy
+Withdraw flow:
 
-To prevent permanent fund lockup:
-- Blend call failures are handled gracefully
-- If a supply/withdraw fails, the transaction continues where possible
-- State is updated atomically to prevent inconsistencies
-- Withdrawals check vault balance and pull from Blend if needed
+1. Vault calls `submit` with a type-1 request.
+2. Blend transfers USDC back to the vault.
 
-## Verification Required
+## Testing
 
-⚠️ **CRITICAL**: The exact function signatures above are based on typical lending pool patterns and should be verified against Blend's actual contract interface before production deployment.
+| Layer | Command |
+|-------|---------|
+| Unit / mock pool | `cargo test -p neurowealth-vault` |
+| Blend interface (feature) | `cargo test -p neurowealth-vault --features blend-devnet` |
 
-### Items to Verify:
+Manual devnet smoke (replace addresses):
 
-1. **Function Names**: Confirm the exact function names (may be `deposit`/`redeem` instead of `supply`/`withdraw`)
-2. **Parameter Order**: Verify parameter order matches Blend's interface
-3. **Return Types**: Confirm return types (may return structs instead of i128)
-4. **Token Transfer Pattern**: Verify if Blend requires pre-approval or handles transfers differently
-5. **Error Handling**: Understand how Blend handles errors (panics vs. return values)
+```bash
+soroban contract invoke --id "$BLEND_POOL" --network testnet -- balance \
+  --asset "$USDC" --user "$VAULT"
+```
 
-## Testnet Deployment Addresses
+## Protocol Tracking
 
-Testnet deployment addresses should be obtained from:
-- Blend's official documentation
-- `blend-utils` repository deployment scripts
-- Blend team communication channels
+`DataKey::CurrentProtocol`:
 
-## Integration Architecture Decisions
-
-### Direct Pool Integration vs. Intermediate Contracts
-
-Blend supports both direct pool integration and intermediate contracts (fee vaults). For the NeuroWealth Vault:
-
-- **Decision**: Direct pool integration (simpler, lower gas costs)
-- **Rationale**: Vault doesn't need fee sharing features initially
-- **Future Consideration**: May migrate to intermediate contract if fee sharing becomes desirable
-
-### Protocol Tracking
-
-The vault tracks the current protocol using `DataKey::CurrentProtocol`:
-- `"none"`: Funds not deployed
+- `"none"`: Funds not deployed (or idle in vault only)
 - `"blend"`: Funds deployed to Blend
-- Future: Additional protocols can be added
 
-## Gas Cost Considerations
+`ProtocolChangedEvent` (`proto_chg`) is emitted whenever `CurrentProtocol` changes.
 
-Expected gas costs for operations:
-- `supply_to_blend()`: ~50,000-100,000 operations (approval + supply call)
-- `withdraw_from_blend()`: ~30,000-70,000 operations (withdraw call)
-- `rebalance()`: ~80,000-150,000 operations (withdraw + supply if switching)
-- `withdraw()` with Blend pull: ~100,000-200,000 operations (withdraw from Blend + transfer)
+## Rebalance API (agent)
 
-**Note**: Actual gas costs should be measured on testnet and documented in integration tests.
+```rust
+pub fn rebalance(env: Env, protocol: Symbol, expected_apy: i128, min_out: i128);
+```
+
+- `min_out`: minimum assets received per supply/withdraw leg; `0` disables slippage checks.
+- `RebalanceEvent.status == "noop"`: no funds moved (e.g. already in Blend with zero idle USDC).
 
 ## Security Considerations
 
-1. **Reentrancy**: Blend calls are made after state updates (CEI pattern)
-2. **Fund Lockup Prevention**: Errors in Blend calls don't prevent withdrawals
-3. **Balance Verification**: Vault verifies it has sufficient balance before user transfers
-4. **Approval Limits**: Token approvals are set with reasonable expiration times
+1. **Reentrancy**: Blend calls follow state updates where applicable (CEI on protocol transitions).
+2. **Incomplete exit**: Rebalance aborts if a protocol switch cannot withdraw the full deployed balance.
+3. **Slippage**: Optional `min_out` guard on supply/withdraw legs.
 
-## Testing Strategy
-
-1. **Unit Tests**: Mock Blend pool contract for basic functionality
-2. **Integration Tests**: Test against Blend testnet deployment
-3. **Failure Scenarios**: Test Blend call failures, insufficient balance, etc.
-4. **Gas Measurement**: Document actual gas costs for all operations
-
-## Next Steps
+## Status
 
 1. ✅ Research Blend interface (this document)
-2. ✅ Implement storage keys and configuration
-3. ✅ Implement Blend client interface
-4. ✅ Update rebalance() and withdraw() functions
-5. ⏳ Verify function signatures against actual Blend contract
-6. ⏳ Write integration tests against testnet
-7. ⏳ Document actual gas costs
-8. ⏳ Security review of cross-contract call patterns
+2. ✅ Implement `BlendPoolClient` with production entrypoints
+3. ✅ `ProtocolChangedEvent` for indexers
+4. ✅ Rebalance `min_out` slippage guard
+5. ✅ No-op rebalance semantics (`status: "noop"`)
+6. ⏳ Measure gas on testnet
+7. ⏳ Security review of cross-contract call patterns
 
 ## References
 
 - Blend GitHub: https://github.com/blend-capital
 - Blend Documentation: https://docs.blend.capital
 - Soroban SDK Documentation: https://soroban.stellar.org/docs
-- Stellar Testnet: https://developers.stellar.org/docs/encyclopedia/testnet

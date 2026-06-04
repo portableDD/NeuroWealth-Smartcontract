@@ -109,6 +109,7 @@ log_section "PRE-FLIGHT CHECKS"
 mkdir -p "$ARTIFACTS_DIR"
 
 # Check for stellar CLI (replaces soroban CLI in recent versions)
+STELLAR_VERSION=$(cat "$REPO_ROOT/.stellar-version" | tr -d '[:space:]')
 if command -v stellar &>/dev/null; then
   CLI="stellar"
   log "Using stellar CLI: $(stellar --version)"
@@ -119,7 +120,7 @@ elif command -v soroban &>/dev/null; then
   stellar() { soroban "$@"; }
 else
   log "ERROR: Neither 'stellar' nor 'soroban' CLI found in PATH."
-  log "Install with: cargo install --locked stellar-cli"
+  log "Install version $STELLAR_VERSION with: cargo install --locked stellar-cli --version $STELLAR_VERSION"
   exit 1
 fi
 
@@ -422,7 +423,8 @@ REBALANCE_OUTPUT=$(run_soroban "Rebalance to 'none' protocol" \
   -- \
   rebalance \
   --protocol "none" \
-  --expected_apy "0" 2>&1) || {
+  --expected_apy "0" \
+  --min_out "0" 2>&1) || {
   record_fail "rebalance_none" "Rebalance failed: $REBALANCE_OUTPUT"
   REBALANCE_OUTPUT="FAILED: $REBALANCE_OUTPUT"
 }

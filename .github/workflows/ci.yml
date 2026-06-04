@@ -26,6 +26,9 @@ jobs:
           - name: "Tests"
             step: "test"
             working_directory: "neurowealth-vault"
+          - name: "Documentation Check"
+            step: "doc"
+            working_directory: "neurowealth-vault"
           - name: "Build WASM"
             step: "build-wasm"
             working_directory: "neurowealth-vault"
@@ -33,6 +36,12 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Read Stellar CLI version
+        id: cli-version
+        run: |
+          VERSION=$(cat .stellar-version | tr -d '[:space:]')
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Install Rust toolchain with components
         uses: dtolnay/rust-toolchain@stable
@@ -61,8 +70,9 @@ jobs:
       - name: Install Stellar CLI
         if: matrix.step == 'build-wasm'
         run: |
+          VERSION="${{ steps.cli-version.outputs.version }}"
           mkdir -p "$HOME/.local/bin"
-          curl -sSL https://github.com/stellar/soroban-tools/releases/download/v21.2.0/soroban-cli-21.2.0-x86_64-unknown-linux-gnu.tar.gz | tar -xz
+          curl -sSL "https://github.com/stellar/soroban-tools/releases/download/v${VERSION}/soroban-cli-${VERSION}-x86_64-unknown-linux-gnu.tar.gz" | tar -xz
           mv soroban "$HOME/.local/bin/soroban"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           soroban --version
@@ -88,6 +98,9 @@ jobs:
             test)
               cargo test --verbose
               ;;
+            doc)
+              cargo doc --no-deps
+              ;;
             build-wasm)
               RUSTFLAGS="-C target-cpu=mvp" cargo build \
                 --target wasm32-unknown-unknown \
@@ -105,13 +118,62 @@ jobs:
               ;;
           esac
 
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      contract: ${{ steps.filter.outputs.contract }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Check for contract changes
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            contract:
+              - 'neurowealth-vault/**'
+
+  fuzz-deposit-withdraw:
+    name: Fuzz deposit/withdraw (nightly)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: neurowealth-vault
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Run deposit/withdraw fuzz target
+        working-directory: neurowealth-vault
+        run: cargo fuzz run deposit_withdraw_sequence -- -runs=5000 -max_total_time=300
+
   e2e-devnet:
     name: E2E Devnet Validation
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: ci-matrix
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    needs: [ci-matrix, changes]
+    # Trigger e2e-devnet on manual dispatch, weekly schedule, or PRs with 'run-e2e' label or contract modifications
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
+      (github.event_name == 'pull_request' && (
+        contains(github.event.pull_request.labels.*.name, 'run-e2e') ||
+        needs.changes.outputs.contract == 'true'
+      ))
 
+    # Required secrets:
+    # - SOROBAN_SECRET_KEY: Funded Stellar account secret key used by E2E script
+    #                       to deploy and interact with the contracts on testnet.
     env:
       SOROBAN_RPC_URL: https://soroban-testnet.stellar.org
       SOROBAN_NETWORK_PASSPHRASE: "Test SDF Network ; September 2015"
@@ -119,6 +181,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Read Stellar CLI version
+        id: cli-version
+        run: |
+          VERSION=$(cat .stellar-version | tr -d '[:space:]')
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -132,6 +200,7 @@ jobs:
 
       - name: Install Stellar CLI
         run: |
+          VERSION="${{ steps.cli-version.outputs.version }}"
           if [[ -x "$HOME/.local/bin/soroban" ]]; then
             echo "$HOME/.local/bin" >> "$GITHUB_PATH"
             soroban --version
@@ -139,7 +208,7 @@ jobs:
           fi
 
           mkdir -p "$HOME/.local/bin"
-          curl -sSL https://github.com/stellar/soroban-tools/releases/download/v21.2.0/soroban-cli-21.2.0-x86_64-unknown-linux-gnu.tar.gz | tar -xz
+          curl -sSL "https://github.com/stellar/soroban-tools/releases/download/v${VERSION}/soroban-cli-${VERSION}-x86_64-unknown-linux-gnu.tar.gz" | tar -xz
           mv soroban "$HOME/.local/bin/soroban"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           soroban --version

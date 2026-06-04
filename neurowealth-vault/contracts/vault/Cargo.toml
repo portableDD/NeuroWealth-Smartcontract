@@ -6,6 +6,11 @@ edition = "2021"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+default = []
+# Enable `cargo test -p neurowealth-vault --features blend-devnet`
+blend-devnet = []
+
 [dependencies]
 soroban-sdk = { workspace = true }
 

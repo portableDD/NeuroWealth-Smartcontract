@@ -3,11 +3,12 @@
 use super::utils::*;
 use crate::{
     AgentUpdatedEvent, AssetsUpdatedEvent, BlendSupplyEvent, BlendWithdrawEvent, CapsUpdatedEvent,
-    DepositEvent, EmergencyPausedEvent, LimitsUpdatedEvent, RebalanceEvent, VaultInitializedEvent,
-    VaultPausedEvent, VaultUnpausedEvent, WithdrawEvent, TOPIC_AGENT_UPDATED, TOPIC_ASSETS_UPDATED,
-    TOPIC_BLEND_SUPPLY, TOPIC_BLEND_WITHDRAW, TOPIC_CAPS_UPDATED, TOPIC_DEPOSIT,
-    TOPIC_EMERGENCY_PAUSED, TOPIC_INIT, TOPIC_LIMITS_UPDATED, TOPIC_PAUSED, TOPIC_REBALANCE,
-    TOPIC_UNPAUSED, TOPIC_WITHDRAW,
+    DepositEvent, EmergencyPausedEvent, LimitsUpdatedEvent, RebalanceEvent, TvlCapUpdatedEvent,
+    UserDepositCapUpdatedEvent, VaultInitializedEvent, VaultPausedEvent, VaultUnpausedEvent,
+    WithdrawEvent, TOPIC_AGENT_UPDATED, TOPIC_ASSETS_UPDATED, TOPIC_BLEND_SUPPLY,
+    TOPIC_BLEND_WITHDRAW, TOPIC_CAPS_UPDATED, TOPIC_DEPOSIT, TOPIC_EMERGENCY_PAUSED, TOPIC_INIT,
+    TOPIC_LIMITS_UPDATED, TOPIC_PAUSED, TOPIC_REBALANCE, TOPIC_TVL_CAP_UPDATED, TOPIC_UNPAUSED,
+    TOPIC_USER_CAP_UPDATED, TOPIC_WITHDRAW,
 };
 use soroban_sdk::{symbol_short, testutils::Address as _, Address, BytesN, Env, TryFromVal};
 
@@ -274,6 +275,53 @@ fn test_set_deposit_limits_emits_limits_event_with_correct_payload() {
 }
 
 #[test]
+fn test_set_tvl_cap_emits_tvl_cap_event_with_correct_payload() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let old_tvl_cap = 100_000_000_000_i128; // Default from initialize
+    let new_tvl_cap = 200_000_000_000_i128;
+    client.set_tvl_cap(&new_tvl_cap);
+
+    let tvl_events = find_events_by_topic(env.events().all(), &env, TOPIC_TVL_CAP_UPDATED);
+    assert!(!tvl_events.is_empty(), "set_tvl_cap should emit an event");
+
+    let (_, _, data) = &tvl_events[0];
+    let event =
+        TvlCapUpdatedEvent::try_from_val(&env, data).expect("Should be a TvlCapUpdatedEvent");
+    assert_eq!(event.old_cap, old_tvl_cap);
+    assert_eq!(event.new_cap, new_tvl_cap);
+}
+
+#[test]
+fn test_set_user_deposit_cap_emits_user_cap_event_with_correct_payload() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let old_user_cap = 10_000_000_000_i128; // Default from initialize
+    let new_user_cap = 20_000_000_000_i128;
+    client.set_user_deposit_cap(&new_user_cap);
+
+    let user_events = find_events_by_topic(env.events().all(), &env, TOPIC_USER_CAP_UPDATED);
+    assert!(
+        !user_events.is_empty(),
+        "set_user_deposit_cap should emit an event"
+    );
+
+    let (_, _, data) = &user_events[0];
+    let event = UserDepositCapUpdatedEvent::try_from_val(&env, data)
+        .expect("Should be a UserDepositCapUpdatedEvent");
+    assert_eq!(event.old_cap, old_user_cap);
+    assert_eq!(event.new_cap, new_user_cap);
+}
+
+#[test]
 fn test_set_caps_emits_caps_event_with_correct_payload() {
     let env = Env::default();
     env.mock_all_auths();
@@ -377,7 +425,7 @@ fn test_rebalance_emits_rebalance_event_with_correct_payload() {
     let client = NeuroWealthVaultClient::new(&env, &contract_id);
 
     let expected_apy = 850_i128;
-    client.rebalance(&symbol_short!("none"), &expected_apy);
+    client.rebalance(&symbol_short!("none"), &expected_apy, &0_i128);
 
     let rebalance_events = find_events_by_topic(env.events().all(), &env, TOPIC_REBALANCE);
     assert!(
@@ -398,14 +446,16 @@ fn test_rebalance_emits_rebalance_event_with_correct_payload() {
     );
     assert_eq!(
         event.status,
-        symbol_short!("success"),
-        "Event status should be success"
+        symbol_short!("noop"),
+        "Event status should be noop when no funds move"
     );
     assert_eq!(
         event.amount_attempted, 0,
         "Event amount_attempted should be 0"
     );
     assert_eq!(event.amount_moved, 0, "Event amount_moved should be 0");
+    assert_eq!(event.amount_supplied, 0, "Event amount_supplied should be 0");
+    assert_eq!(event.amount_withdrawn, 0, "Event amount_withdrawn should be 0");
 }
 
 #[test]
@@ -423,7 +473,7 @@ fn test_rebalance_with_blend_emits_correct_event() {
     mint_and_deposit(&env, &client, &usdc_token, &user, 10_000_000_i128);
 
     let expected_apy = 1200_i128;
-    client.rebalance(&symbol_short!("blend"), &expected_apy);
+    client.rebalance(&symbol_short!("blend"), &expected_apy, &0_i128);
 
     let rebalance_events = find_events_by_topic(env.events().all(), &env, TOPIC_REBALANCE);
     let last_event_data = &rebalance_events.last().unwrap().2;
@@ -451,6 +501,11 @@ fn test_rebalance_with_blend_emits_correct_event() {
         event.amount_moved, 10_000_000_i128,
         "Event amount_moved should match supplied balance"
     );
+    assert_eq!(
+        event.amount_supplied, 10_000_000_i128,
+        "Event amount_supplied should match supplied balance"
+    );
+    assert_eq!(event.amount_withdrawn, 0, "Event amount_withdrawn should be 0");
 }
 
 #[test]
@@ -472,7 +527,7 @@ fn test_rebalance_with_blend_partial_fill_emits_correct_event() {
     mint_and_deposit(&env, &client, &usdc_token, &user, 10_000_000_i128);
 
     let expected_apy = 1200_i128;
-    client.rebalance(&symbol_short!("blend"), &expected_apy);
+    client.rebalance(&symbol_short!("blend"), &expected_apy, &0_i128);
 
     let rebalance_events = find_events_by_topic(env.events().all(), &env, TOPIC_REBALANCE);
     let last_event_data = &rebalance_events.last().unwrap().2;
@@ -496,6 +551,11 @@ fn test_rebalance_with_blend_partial_fill_emits_correct_event() {
         event.amount_moved, 3_000_000_i128,
         "Event amount_moved should be 3M"
     );
+    assert_eq!(
+        event.amount_supplied, 3_000_000_i128,
+        "Event amount_supplied should be 3M"
+    );
+    assert_eq!(event.amount_withdrawn, 0, "Event amount_withdrawn should be 0");
 }
 
 #[test]
@@ -517,7 +577,7 @@ fn test_rebalance_with_blend_failed_fill_emits_correct_event() {
     mint_and_deposit(&env, &client, &usdc_token, &user, 10_000_000_i128);
 
     let expected_apy = 1200_i128;
-    client.rebalance(&symbol_short!("blend"), &expected_apy);
+    client.rebalance(&symbol_short!("blend"), &expected_apy, &0_i128);
 
     let rebalance_events = find_events_by_topic(env.events().all(), &env, TOPIC_REBALANCE);
     let last_event_data = &rebalance_events.last().unwrap().2;
@@ -538,6 +598,8 @@ fn test_rebalance_with_blend_failed_fill_emits_correct_event() {
         "Event amount_attempted should be 10M"
     );
     assert_eq!(event.amount_moved, 0, "Event amount_moved should be 0");
+    assert_eq!(event.amount_supplied, 0, "Event amount_supplied should be 0");
+    assert_eq!(event.amount_withdrawn, 0, "Event amount_withdrawn should be 0");
 }
 
 #[test]
@@ -550,7 +612,7 @@ fn test_all_events_have_correct_topics() {
 
     client.set_deposit_limits(&1_000_000_i128, &10_000_000_000_i128);
     client.set_caps(&10_000_000_i128, &100_000_000_i128);
-    client.rebalance(&symbol_short!("none"), &500_i128);
+    client.rebalance(&symbol_short!("none"), &500_i128, &0_i128);
     client.pause(&owner);
     client.unpause(&owner);
     client.emergency_pause(&owner);
@@ -608,7 +670,7 @@ fn test_withdraw_all_partial_liquidity_emits_burned_shares() {
     let _total_shares_before = client.get_total_shares();
     let _total_assets_before = client.get_total_assets();
 
-    client.rebalance(&symbol_short!("blend"), &900_i128);
+    client.rebalance(&symbol_short!("blend"), &900_i128, &0_i128);
 
     // After rebalance: 90% in blend (9M), 10% in vault (1M)
     // Vault balance is 1,000,000
@@ -699,7 +761,7 @@ fn test_blend_supply_event_reports_actual_supplied_with_shortfall() {
     mint_and_deposit(&env, &client, &usdc_token, &user, 10_000_000_i128);
 
     // Rebalance 90% to blend - vault tries to supply 9M, but pool only accepts 3M
-    client.rebalance(&symbol_short!("blend"), &900_i128);
+    client.rebalance(&symbol_short!("blend"), &900_i128, &0_i128);
 
     // Verify actual supplied was less than requested
     let pool_supplied = blend_client.supplied(&usdc_token);
@@ -718,11 +780,11 @@ fn test_blend_supply_event_reports_actual_supplied_with_shortfall() {
 
     // CRITICAL: Event must report actual supplied (3M), NOT requested (9M)
     assert_eq!(
-        event.amount, 3_000_000_i128,
+        event.amount_actual, 3_000_000_i128,
         "Event must report actual supplied amount, not requested amount"
     );
     assert!(
-        event.amount < 9_000_000_i128,
+        event.amount_actual < 9_000_000_i128,
         "Actual supplied should be less than requested due to shortfall"
     );
     assert!(
@@ -756,7 +818,7 @@ fn test_blend_withdraw_event_reports_actual_withdrawn_with_shortfall() {
     mint_and_deposit(&env, &client, &usdc_token, &user, 10_000_000_i128);
 
     // Rebalance to blend - 100% of vault balance (10M) goes to pool
-    client.rebalance(&symbol_short!("blend"), &500_i128);
+    client.rebalance(&symbol_short!("blend"), &500_i128, &0_i128);
 
     // Verify pool has 10M (entire vault balance was supplied)
     assert_eq!(
@@ -818,11 +880,11 @@ fn test_blend_withdraw_event_reports_actual_withdrawn_with_shortfall() {
     // CRITICAL: Event must report actual received (500K), NOT requested (2M)
     let expected_pool_withdrawn = 500_000_i128;
     assert_eq!(
-        event.amount_received, expected_pool_withdrawn,
+        event.amount_actual, expected_pool_withdrawn,
         "Event must report actual received from pool, not requested amount"
     );
     assert!(
-        event.amount_received < event.requested_amount,
+        event.amount_actual < requested_withdraw,
         "Actual received should be less than requested due to pool shortfall"
     );
     assert!(

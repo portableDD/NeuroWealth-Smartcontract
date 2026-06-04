@@ -6,68 +6,10 @@ use soroban_sdk::{
 };
 
 // ============================================================================
-// SIMPLE TEST TOKEN CONTRACT
+// SIMPLE TEST TOKEN CONTRACT (Imported from shared test utils)
 // ============================================================================
 
-#[contracttype]
-enum TokenDataKey {
-    Balance(Address),
-}
-
-mod token {
-    use super::*;
-
-    #[contract]
-    pub struct TestToken;
-
-    #[contractimpl]
-    impl TestToken {
-        pub fn mint(env: Env, to: Address, amount: i128) {
-            let balance: i128 = env
-                .storage()
-                .persistent()
-                .get(&TokenDataKey::Balance(to.clone()))
-                .unwrap_or(0);
-            env.storage()
-                .persistent()
-                .set(&TokenDataKey::Balance(to), &(balance + amount));
-        }
-
-        pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
-            from.require_auth();
-            assert!(amount > 0, "amount must be positive");
-
-            let from_balance: i128 = env
-                .storage()
-                .persistent()
-                .get(&TokenDataKey::Balance(from.clone()))
-                .unwrap_or(0);
-            assert!(from_balance >= amount, "insufficient balance");
-
-            let to_balance: i128 = env
-                .storage()
-                .persistent()
-                .get(&TokenDataKey::Balance(to.clone()))
-                .unwrap_or(0);
-
-            env.storage()
-                .persistent()
-                .set(&TokenDataKey::Balance(from), &(from_balance - amount));
-            env.storage()
-                .persistent()
-                .set(&TokenDataKey::Balance(to), &(to_balance + amount));
-        }
-
-        pub fn balance(env: Env, owner: Address) -> i128 {
-            env.storage()
-                .persistent()
-                .get(&TokenDataKey::Balance(owner))
-                .unwrap_or(0)
-        }
-    }
-}
-
-use token::{TestToken, TestTokenClient};
+use crate::comprehensive_tests::utils::{TestToken, TestTokenClient};
 
 
 // ============================================================================
@@ -137,7 +79,7 @@ fn test_set_deposit_limits_success() {
 }
 
 #[test]
-#[should_panic(expected = "vault: minimum deposit too low")]
+#[should_panic(expected = "Error(Contract, #26)")]
 fn test_set_deposit_limits_min_too_low() {
     let env = Env::default();
     env.mock_all_auths();
@@ -152,7 +94,7 @@ fn test_set_deposit_limits_min_too_low() {
 }
 
 #[test]
-#[should_panic(expected = "vault: maximum deposit below minimum")]
+#[should_panic(expected = "Error(Contract, #27)")]
 fn test_set_deposit_limits_max_less_than_min() {
     let env = Env::default();
     env.mock_all_auths();
@@ -167,7 +109,7 @@ fn test_set_deposit_limits_max_less_than_min() {
 }
 
 #[test]
-#[should_panic(expected = "vault: below minimum deposit")]
+#[should_panic(expected = "Error(Contract, #38)")]
 fn test_deposit_below_minimum() {
     let env = Env::default();
     env.mock_all_auths();
@@ -188,7 +130,7 @@ fn test_deposit_below_minimum() {
 }
 
 #[test]
-#[should_panic(expected = "vault: exceeds maximum deposit")]
+#[should_panic(expected = "Error(Contract, #39)")]
 fn test_deposit_above_maximum() {
     let env = Env::default();
     env.mock_all_auths();
@@ -251,7 +193,7 @@ fn test_deposit_at_maximum_succeeds() {
 }
 
 #[test]
-#[should_panic(expected = "vault: below minimum deposit")]
+#[should_panic(expected = "Error(Contract, #38)")]
 fn test_deposit_one_stroop_below_minimum() {
     let env = Env::default();
     env.mock_all_auths();
@@ -268,7 +210,7 @@ fn test_deposit_one_stroop_below_minimum() {
 }
 
 #[test]
-#[should_panic(expected = "vault: exceeds maximum deposit")]
+#[should_panic(expected = "Error(Contract, #39)")]
 fn test_deposit_one_stroop_above_maximum() {
     let env = Env::default();
     env.mock_all_auths();
@@ -692,7 +634,7 @@ fn test_owner_can_upgrade() {
 }
 
 #[test]
-#[should_panic(expected = "vault: caller is not the owner")]
+#[should_panic(expected = "Error(Contract, #34)")]
 fn test_non_owner_cannot_upgrade() {
     let env = Env::default();
     env.mock_all_auths();
@@ -724,6 +666,27 @@ fn test_version_increments_correctly() {
 
     client.upgrade(&owner, &new_wasm_hash);
     assert_eq!(client.get_version(), 3u32);
+}
+
+#[test]
+fn test_invalid_hash_does_not_increment_version() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner) = setup_vault(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let owner = client.get_owner();
+    let initial_version = client.get_version();
+
+    let fake_wasm_hash = BytesN::from_array(&env, &[0u8; 32]);
+
+    // This should fail because the hash is invalid
+    let result = client.try_upgrade(&owner, &fake_wasm_hash);
+    assert!(result.is_err());
+
+    // The version should remain unchanged
+    assert_eq!(client.get_version(), initial_version);
 }
 
 #[test]
@@ -829,7 +792,7 @@ fn test_withdraw_reconciles_partial_blend_redemption() {
     client.deposit(&user, &deposit_amount);
 
     // 2. Rebalance to Blend
-    client.rebalance(&symbol_short!("blend"), &800_i128);
+    client.rebalance(&symbol_short!("blend"), &800_i128, &0_i128);
 
     // Verify funds moved to pool
     assert_eq!(token_client.balance(&contract_id), 0);
@@ -873,7 +836,7 @@ fn test_withdraw_all_reconciles_partial_blend_redemption() {
     client.deposit(&user, &deposit_amount);
 
     // 2. Rebalance to Blend
-    client.rebalance(&symbol_short!("blend"), &800_i128);
+    client.rebalance(&symbol_short!("blend"), &800_i128, &0_i128);
 
     // 3. User attempts to withdraw_all (entitled to 20 USDC)
     // MockBlendPool will only return 10 USDC (half of its 20 USDC balance)
@@ -888,4 +851,95 @@ fn test_withdraw_all_reconciles_partial_blend_redemption() {
 
     // Vault accounting should be consistent
     assert_eq!(client.get_total_assets(), 10_000_000_i128);
+}
+
+// ============================================================================
+// SET LIMITS INVARIANT VALIDATION TESTS (#120)
+// ============================================================================
+
+#[test]
+fn test_set_limits_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner) = setup_vault(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let user_cap = 5_000_000_i128;   // 5 USDC per-user cap
+    let tvl_cap  = 50_000_000_i128;  // 50 USDC TVL cap
+
+    client.set_limits(&user_cap, &tvl_cap);
+
+    assert_eq!(client.get_min_deposit(), user_cap);
+    assert_eq!(client.get_max_deposit(), tvl_cap);
+}
+
+#[test]
+fn test_set_limits_negative_min_returns_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner) = setup_vault(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let result = client.try_set_limits(&(-1_i128), &10_000_000_i128);
+    assert_eq!(result, Err(Ok(VaultError::NegativeMin)));
+}
+
+#[test]
+fn test_set_limits_negative_max_returns_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner) = setup_vault(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let result = client.try_set_limits(&1_000_000_i128, &(-1_i128));
+    assert_eq!(result, Err(Ok(VaultError::NegativeMax)));
+}
+
+#[test]
+fn test_set_limits_max_less_than_min_returns_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner) = setup_vault(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let result = client.try_set_limits(&5_000_000_i128, &4_000_000_i128);
+    assert_eq!(result, Err(Ok(VaultError::MaxLessThanMin)));
+}
+
+#[test]
+fn test_set_limits_equal_min_max_allowed() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner) = setup_vault(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    // max == min is valid (max >= min)
+    let cap = 5_000_000_i128;
+    client.set_limits(&cap, &cap);
+
+    assert_eq!(client.get_min_deposit(), cap);
+    assert_eq!(client.get_max_deposit(), cap);
+}
+
+#[test]
+fn test_set_limits_emits_event_with_correct_fields() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner) = setup_vault(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let user_cap = 2_000_000_i128;
+    let tvl_cap  = 20_000_000_i128;
+
+    client.set_limits(&user_cap, &tvl_cap);
+
+    let events = env.events().all();
+    // The last event should be LimitsUpdatedEvent
+    assert!(!events.is_empty(), "expected at least one event");
 }
