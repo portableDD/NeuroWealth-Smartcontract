@@ -8,14 +8,15 @@
 
 use super::utils::*;
 use crate::{
-    AgentUpdatedEvent, AssetsUpdatedEvent, BlendSupplyEvent, BlendWithdrawEvent, DepositEvent,
-    EmergencyPausedEvent, LimitsUpdatedEvent, OwnershipTransferInitiatedEvent,
+    AgentUpdatedEvent, AssetsUpdatedEvent, BlendSupplyEvent, BlendWithdrawEvent,
+    DepositEvent, DepositLimitsUpdatedEvent, EmergencyPausedEvent, OwnershipTransferInitiatedEvent,
     OwnershipTransferredEvent, ProtocolChangedEvent, RebalanceEvent, TvlCapUpdatedEvent,
     UserDepositCapUpdatedEvent, VaultInitializedEvent, VaultPausedEvent, VaultUnpausedEvent,
     WithdrawEvent, TOPIC_AGENT_UPDATED, TOPIC_ASSETS_UPDATED, TOPIC_BLEND_SUPPLY,
-    TOPIC_BLEND_WITHDRAW, TOPIC_DEPOSIT, TOPIC_EMERGENCY_PAUSED, TOPIC_INIT, TOPIC_LIMITS_UPDATED,
-    TOPIC_OWNERSHIP_INITIATED, TOPIC_OWNERSHIP_TRANSFERRED, TOPIC_PAUSED, TOPIC_PROTOCOL_CHANGED,
-    TOPIC_REBALANCE, TOPIC_TVL_CAP_UPDATED, TOPIC_UNPAUSED, TOPIC_USER_CAP_UPDATED, TOPIC_WITHDRAW,
+    TOPIC_BLEND_WITHDRAW, TOPIC_DEPOSIT, TOPIC_DEPOSIT_LIMITS_UPDATED, TOPIC_EMERGENCY_PAUSED,
+    TOPIC_INIT, TOPIC_OWNERSHIP_INITIATED, TOPIC_OWNERSHIP_TRANSFERRED, TOPIC_PAUSED,
+    TOPIC_PROTOCOL_CHANGED, TOPIC_REBALANCE, TOPIC_TVL_CAP_UPDATED, TOPIC_UNPAUSED,
+    TOPIC_USER_CAP_UPDATED, TOPIC_WITHDRAW,
 };
 use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env, TryFromVal};
 
@@ -124,21 +125,21 @@ fn test_event_schema_administrative_events() {
         VaultUnpausedEvent::try_from_val(&env, data).expect("Should be a valid VaultUnpausedEvent");
     assert_eq!(unpause_event.owner, owner);
 
-    // Test limits update event
+    // Test deposit limits update event
     let new_min = 2_000_000_i128;
     let new_max = 20_000_000_000_i128;
     client.set_deposit_limits(&new_min, &new_max);
 
-    let limits_events = find_events_by_topic(env.events().all(), &env, TOPIC_LIMITS_UPDATED);
+    let limits_events = find_events_by_topic(env.events().all(), &env, TOPIC_DEPOSIT_LIMITS_UPDATED);
     assert_eq!(
         limits_events.len(),
         1,
-        "Exactly one limits update event should be emitted"
+        "Exactly one deposit limits update event should be emitted"
     );
 
     let (_, _, data) = &limits_events[0];
-    let limits_event =
-        LimitsUpdatedEvent::try_from_val(&env, data).expect("Should be a valid LimitsUpdatedEvent");
+    let limits_event = DepositLimitsUpdatedEvent::try_from_val(&env, data)
+        .expect("Should be a valid DepositLimitsUpdatedEvent");
 
     // Verify payload structure
     assert_eq!(limits_event.old_min, 1_000_000_i128); // Default minimum
@@ -501,7 +502,7 @@ fn test_all_event_topics_schema_compliance() {
         ("paused", "Vault paused"),
         ("unpaused", "Vault unpaused"),
         ("emerg", "Emergency pause"),
-        ("l_upd", "Limits updated"),
+        ("dep_lim", "Deposit limits updated"),
         ("tvl_cap", "TVL cap updated"),
         ("user_cap", "User cap updated"),
         ("agent", "Agent updated"),
@@ -566,8 +567,9 @@ fn test_all_event_topics_schema_compliance() {
                     description
                 );
             }
-            "limits" => {
-                let events = find_events_by_topic(env.events().all(), &env, TOPIC_LIMITS_UPDATED);
+            "dep_lim" => {
+                let events =
+                    find_events_by_topic(env.events().all(), &env, TOPIC_DEPOSIT_LIMITS_UPDATED);
                 assert!(
                     !events.is_empty(),
                     "Expected event topic '{}' for {} not found",

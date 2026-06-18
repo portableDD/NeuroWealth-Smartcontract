@@ -3,12 +3,13 @@
 use super::utils::*;
 use crate::{
     AgentUpdatedEvent, AssetsUpdatedEvent, BlendPoolConfiguredEvent, BlendSupplyEvent,
-    BlendWithdrawEvent, CapsUpdatedEvent, DepositEvent, EmergencyPausedEvent, LimitsUpdatedEvent,
-    RebalanceEvent, TvlCapUpdatedEvent, UserDepositCapUpdatedEvent, VaultInitializedEvent,
-    VaultPausedEvent, VaultUnpausedEvent, WithdrawEvent, TOPIC_AGENT_UPDATED, TOPIC_ASSETS_UPDATED,
-    TOPIC_BLEND_POOL_CONFIGURED, TOPIC_BLEND_SUPPLY, TOPIC_BLEND_WITHDRAW, TOPIC_CAPS_UPDATED,
-    TOPIC_DEPOSIT, TOPIC_EMERGENCY_PAUSED, TOPIC_INIT, TOPIC_LIMITS_UPDATED, TOPIC_PAUSED,
-    TOPIC_REBALANCE, TOPIC_TVL_CAP_UPDATED, TOPIC_UNPAUSED, TOPIC_USER_CAP_UPDATED, TOPIC_WITHDRAW,
+    BlendWithdrawEvent, CapsUpdatedEvent, DepositEvent, DepositLimitsUpdatedEvent,
+    EmergencyPausedEvent, RebalanceEvent, TvlCapUpdatedEvent, UserDepositCapUpdatedEvent,
+    VaultInitializedEvent, VaultPausedEvent, VaultUnpausedEvent, WithdrawEvent,
+    TOPIC_AGENT_UPDATED, TOPIC_ASSETS_UPDATED, TOPIC_BLEND_POOL_CONFIGURED, TOPIC_BLEND_SUPPLY,
+    TOPIC_BLEND_WITHDRAW, TOPIC_CAPS_UPDATED, TOPIC_DEPOSIT, TOPIC_DEPOSIT_LIMITS_UPDATED,
+    TOPIC_EMERGENCY_PAUSED, TOPIC_INIT, TOPIC_PAUSED, TOPIC_REBALANCE, TOPIC_TVL_CAP_UPDATED,
+    TOPIC_UNPAUSED, TOPIC_USER_CAP_UPDATED, TOPIC_WITHDRAW,
 };
 use soroban_sdk::{symbol_short, testutils::Address as _, Address, BytesN, Env, TryFromVal};
 
@@ -291,15 +292,15 @@ fn test_set_deposit_limits_emits_limits_event_with_correct_payload() {
     let new_max = 20_000_000_000_i128;
     client.set_deposit_limits(&new_min, &new_max);
 
-    let limits_events = find_events_by_topic(env.events().all(), &env, TOPIC_LIMITS_UPDATED);
+    let limits_events = find_events_by_topic(env.events().all(), &env, TOPIC_DEPOSIT_LIMITS_UPDATED);
     assert!(
         !limits_events.is_empty(),
-        "set_deposit_limits should emit a limits event"
+        "set_deposit_limits should emit a DepositLimitsUpdatedEvent"
     );
 
     let (_, _, data) = &limits_events[0];
-    let event =
-        LimitsUpdatedEvent::try_from_val(&env, data).expect("Should be a LimitsUpdatedEvent");
+    let event = DepositLimitsUpdatedEvent::try_from_val(&env, data)
+        .expect("Should be a DepositLimitsUpdatedEvent");
     assert_eq!(
         event.new_min, new_min,
         "Event new_min should match set value"
@@ -672,7 +673,7 @@ fn test_all_events_have_correct_topics() {
     client.emergency_pause(&owner);
 
     let init_events = find_events_by_topic(env.events().all(), &env, TOPIC_INIT);
-    let limits_events = find_events_by_topic(env.events().all(), &env, TOPIC_LIMITS_UPDATED);
+    let limits_events = find_events_by_topic(env.events().all(), &env, TOPIC_DEPOSIT_LIMITS_UPDATED);
     let caps_events = find_events_by_topic(env.events().all(), &env, TOPIC_CAPS_UPDATED);
     let rebalance_events = find_events_by_topic(env.events().all(), &env, TOPIC_REBALANCE);
     let paused_events = find_events_by_topic(env.events().all(), &env, TOPIC_PAUSED);

@@ -496,13 +496,33 @@ pub struct CapsUpdatedEvent {
     pub new_tvl_cap: i128,
 }
 
-/// Emitted when deposit limits are updated.
+/// Emitted by the deprecated `set_limits` function only.
+///
+/// # Deprecated
+/// Use `DepositLimitsUpdatedEvent` (topic `"dep_lim"`) for per-transaction
+/// deposit-limit changes, and `TvlCapUpdatedEvent` / `UserDepositCapUpdatedEvent`
+/// for cap changes. This event is retained only for backward compatibility with
+/// indexers that still observe the `set_limits` call path.
 ///
 /// # Topics
-/// - `SymbolShort("limits_updated")` - Event identifier
+/// - `SymbolShort("l_upd")` - Event identifier
 #[allow(missing_docs)]
 #[contracttype]
 pub struct LimitsUpdatedEvent {
+    pub old_min: i128,
+    pub new_min: i128,
+    pub old_max: i128,
+    pub new_max: i128,
+}
+
+/// Emitted when per-transaction deposit limits (min/max per deposit) are updated
+/// via `set_deposit_limits`.
+///
+/// # Topics
+/// - `SymbolShort("dep_lim")` - Event identifier
+#[allow(missing_docs)]
+#[contracttype]
+pub struct DepositLimitsUpdatedEvent {
     pub old_min: i128,
     pub new_min: i128,
     pub old_max: i128,
@@ -752,6 +772,7 @@ pub(crate) const TOPIC_EMERGENCY_PAUSED: Symbol = symbol_short!("emerg");
 pub(crate) const TOPIC_TVL_CAP_UPDATED: Symbol = symbol_short!("tvl_cap");
 pub(crate) const TOPIC_USER_CAP_UPDATED: Symbol = symbol_short!("user_cap");
 pub(crate) const TOPIC_LIMITS_UPDATED: Symbol = symbol_short!("l_upd");
+pub(crate) const TOPIC_DEPOSIT_LIMITS_UPDATED: Symbol = symbol_short!("dep_lim");
 pub(crate) const TOPIC_CAPS_UPDATED: Symbol = symbol_short!("caps_upd");
 pub(crate) const TOPIC_AGENT_UPDATED: Symbol = symbol_short!("agent");
 pub(crate) const TOPIC_OWNERSHIP_INITIATED: Symbol = symbol_short!("own_init");
@@ -2220,7 +2241,7 @@ impl NeuroWealthVault {
     /// # Events
     ///
     /// Emits:
-    /// - `LimitsUpdatedEvent`
+    /// - `DepositLimitsUpdatedEvent`
     ///
     /// # Errors
     ///
@@ -2258,8 +2279,8 @@ impl NeuroWealthVault {
         env.storage().instance().set(&DataKey::MaxDeposit, &max);
 
         env.events().publish(
-            (TOPIC_LIMITS_UPDATED,),
-            LimitsUpdatedEvent {
+            (TOPIC_DEPOSIT_LIMITS_UPDATED,),
+            DepositLimitsUpdatedEvent {
                 old_min,
                 new_min: min,
                 old_max,
