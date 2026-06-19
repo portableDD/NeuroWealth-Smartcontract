@@ -149,6 +149,75 @@ fn test_owner_can_set_blend_pool() {
 // OWNER-ONLY NEGATIVE PATHS (non-owner must be rejected)
 // ============================================================================
 
+/// `set_deposit_limits` enforces ownership via `require_is_owner`, which calls
+/// `owner.require_auth()` on the stored owner address. Because there is no
+/// explicit address parameter to compare against, the guard cannot be tested
+/// by passing a fake address; instead we revoke all auth with `mock_auths(&[])`
+/// and verify the call is rejected through the `try_*` client variant.
+#[test]
+fn test_non_owner_cannot_set_deposit_limits() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    // Drop all auth: owner.require_auth() inside require_is_owner cannot be
+    // satisfied, so the call must fail regardless of who invokes it.
+    let _non_owner = Address::generate(&env);
+    env.mock_auths(&[]);
+
+    let min = 2_000_000_i128;
+    let max = 50_000_000_000_i128;
+    let result = client.try_set_deposit_limits(&min, &max);
+    assert!(
+        result.is_err(),
+        "set_deposit_limits must reject calls without the owner's authorization"
+    );
+}
+
+/// `set_tvl_cap` is owner-only via `require_is_owner`. Removing that guard
+/// would cause this test to fail: valid inputs would return `Ok` and
+/// `result.is_err()` would be false.
+#[test]
+fn test_non_owner_cannot_set_tvl_cap() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let _non_owner = Address::generate(&env);
+    env.mock_auths(&[]);
+
+    let result = client.try_set_tvl_cap(&50_000_000_000_i128);
+    assert!(
+        result.is_err(),
+        "set_tvl_cap must reject calls without the owner's authorization"
+    );
+}
+
+/// `set_limits` is owner-only via `require_is_owner`. Removing that guard
+/// would cause this test to fail: valid inputs would return `Ok(Ok(()))` and
+/// the outer `result.is_err()` would be false.
+#[test]
+fn test_non_owner_cannot_set_limits() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let _non_owner = Address::generate(&env);
+    env.mock_auths(&[]);
+
+    let result = client.try_set_limits(&1_000_000_i128, &50_000_000_000_i128);
+    assert!(
+        result.is_err(),
+        "set_limits must reject calls without the owner's authorization"
+    );
+}
+
 #[test]
 #[should_panic(expected = "Error(Contract, #19)")]
 fn test_non_owner_cannot_pause() {
