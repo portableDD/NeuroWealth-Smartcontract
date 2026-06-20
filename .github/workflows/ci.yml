@@ -181,6 +181,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       contract: ${{ steps.filter.outputs.contract }}
+      vault_src: ${{ steps.filter.outputs.vault_src }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -191,11 +192,17 @@ jobs:
           filters: |
             contract:
               - 'neurowealth-vault/**'
+            vault_src:
+              - 'neurowealth-vault/contracts/vault/src/**'
 
   fuzz-deposit-withdraw:
-    name: Fuzz deposit/withdraw (nightly)
+    name: Fuzz deposit/withdraw
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule'
+    timeout-minutes: 10
+    needs: [changes]
+    if: |
+      github.event_name == 'schedule' ||
+      (github.event_name == 'pull_request' && needs.changes.outputs.vault_src == 'true')
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -211,7 +218,13 @@ jobs:
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --locked
 
-      - name: Run deposit/withdraw fuzz target
+      - name: Run deposit/withdraw fuzz target (PR – short bounds)
+        if: github.event_name == 'pull_request'
+        working-directory: neurowealth-vault
+        run: cargo fuzz run deposit_withdraw_sequence -- -runs=1000 -max_total_time=120
+
+      - name: Run deposit/withdraw fuzz target (scheduled – full bounds)
+        if: github.event_name == 'schedule'
         working-directory: neurowealth-vault
         run: cargo fuzz run deposit_withdraw_sequence -- -runs=5000 -max_total_time=300
 

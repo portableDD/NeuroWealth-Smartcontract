@@ -11,6 +11,7 @@ This guide will help you get started with our development process, issue labelin
   - [Prerequisites](#prerequisites)
   - [Building the Contract](#building-the-contract)
   - [Running Tests](#running-tests)
+  - [Running Fuzz Tests](#running-fuzz-tests)
 - [CI Requirements](#ci-requirements)
 - [Coding Standards](#coding-standards)
 - [Submitting a Pull Request](#submitting-a-pull-request)
@@ -105,6 +106,50 @@ For frontend or agent changes, run:
 npm test
 ```
 
+### Running Fuzz Tests
+
+The vault's deposit/withdraw share-accounting logic is covered by a [libFuzzer](https://llvm.org/docs/LibFuzzer.html) harness located in `neurowealth-vault/fuzz/fuzz_targets/deposit_withdraw_sequence.rs`.
+
+#### Prerequisites
+
+Fuzz testing requires the Rust **nightly** toolchain and `cargo-fuzz`:
+
+```bash
+rustup toolchain install nightly
+cargo +nightly install cargo-fuzz --locked
+```
+
+#### Running locally
+
+```bash
+cd neurowealth-vault
+
+# Quick smoke-run (≈30 seconds, good for local iteration):
+cargo +nightly fuzz run deposit_withdraw_sequence -- -runs=500 -max_total_time=30
+
+# Longer run matching the CI PR bounds:
+cargo +nightly fuzz run deposit_withdraw_sequence -- -runs=1000 -max_total_time=120
+
+# Full weekly-schedule run:
+cargo +nightly fuzz run deposit_withdraw_sequence -- -runs=5000 -max_total_time=300
+```
+
+If the fuzzer finds a crash, a minimised input is written to
+`neurowealth-vault/fuzz/artifacts/deposit_withdraw_sequence/`.
+Reproduce it with:
+
+```bash
+cargo +nightly fuzz run deposit_withdraw_sequence \
+  fuzz/artifacts/deposit_withdraw_sequence/<crash-file>
+```
+
+#### CI behaviour
+
+| Trigger | Bounds |
+|---|---|
+| PR touching `neurowealth-vault/contracts/vault/src/**` | `-runs=1000 -max_total_time=120` (2 min) |
+| Weekly schedule (`0 3 * * 0`) | `-runs=5000 -max_total_time=300` (5 min) |
+
 ## CI Requirements
 
 Our CI pipeline (defined in `.github/workflows/ci.yml`) runs on every push and pull request. For a PR to be merged, it must pass:
@@ -114,6 +159,7 @@ Our CI pipeline (defined in `.github/workflows/ci.yml`) runs on every push and p
 3. **Tests**: `cargo test --verbose`
 4. **Build WASM**: Successful build of the contract WASM.
 5. **Dependency Audit**: `cargo-deny check` runs against the policy in [`deny.toml`](deny.toml), blocking dependencies with disallowed licenses or known security advisories.
+6. **Fuzz Tests** *(conditional)*: PRs that modify files under `neurowealth-vault/contracts/vault/src/` automatically trigger the `deposit_withdraw_sequence` fuzz target with short bounds (`-runs=1000 -max_total_time=120`). The same target runs with extended bounds on the weekly schedule. See [Running Fuzz Tests](#running-fuzz-tests) for local reproduction steps.
 
 ### Dependency Audit & Advisory Exceptions
 
